@@ -17,9 +17,11 @@ IPV4 = re.compile(rf"(?<![\d.])(?:{OCTET}\.){{3}}{OCTET}{END}")
 MAC = re.compile(r"(?<![0-9A-Fa-f:-])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])")
 
 # Placeholders that identify nothing. Use these in docs, tests and templates.
-NETID_OK = re.compile(r"(?:1\.2\.3\.4|127\.0\.0\.1|0\.0\.0\.0)\.\d+\.\d+")
+DOC_IP = r"(?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d+"  # RFC 5737 documentation ranges
+# A NetId is conventionally the IP plus .1.1, so one built from a documentation IP is fine.
+NETID_OK = re.compile(rf"(?:1\.2\.3\.4|127\.0\.0\.1|0\.0\.0\.0|{DOC_IP})\.\d+\.\d+")
 IPV4_OK = re.compile(
-    r"(?:192\.0\.2|198\.51\.100|203\.0\.113)\.\d+"  # RFC 5737 documentation ranges
+    rf"{DOC_IP}"
     r"|127\.0\.0\.1|0\.0\.0\.0|255\.\d+\.\d+\.\d+"  # loopback, any, netmasks
     r"|1\.\d+\.\d+\.\d+"  # no machine network uses 1/8; file versions such as 1.0.0.3 do
 )
