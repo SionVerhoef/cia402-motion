@@ -16,6 +16,10 @@ jobs:
       - name: SKILL.md frontmatter is valid
         run: python3 scripts/check_skill.py
 
+      # This repository is public: no real AMS NetId, IP or MAC address (see CLAUDE.md).
+      - name: no real network identities committed
+        run: python3 scripts/check_private.py
+
       # Manuals and specs are copyrighted and must never land here (see CLAUDE.md).
       - name: no PDFs committed
         run: |
