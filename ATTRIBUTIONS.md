@@ -9,13 +9,11 @@ is redistributed, so no third-party notice is required. If that changes, the ups
 `LICENSE` goes next to the files and a row goes here, in the same commit. `CLAUDE.md` says
 which licences may ship at all.
 
-## Standards and specifications
-
-| Source | What it contributed |
-|---|---|
-| CiA 402 / IEC 61800-7-201 (drive profile) | **Not read for this skill.** The current CiA 402 parts are open to CiA members only ([CiA technical documents](https://www.can-cia.org/cia-groups/technical-documents)), and the [IEC webstore terms](https://webstore.iec.ch/en/terms-conditions) bar using IEC publications in AI tools without IEC's permission. Object indices, bit numbers and code values are stated as facts, as public vendor manuals and permissive implementations restate them. No text, tables or figures from either document are reproduced. |
-
 ## Code and documentation consulted
+
+The CiA 402 / IEC 61800-7-201 documents themselves were not used. The profile's object
+indices, bit numbers and code values are stated as facts, as the sources below restate them.
+
 
 | Source | Licence | How it was used |
 |---|---|---|
