@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `evals/`: a runner for isolated headless eval cells, the 14-task scouting set, and the
+  no-skill baseline on Opus 5.5, Haiku 5.5 and Haiku 4.5 (`evals/results-scouting.md`).
 - `scripts/cia402.py decode`: statusword, controlword, 0x6502, 0x6060/0x6061 and 0x6098.
   Per-state masks, a fault-first reading of non-standard statuswords, mode-specific bits and
   the homing phase.
