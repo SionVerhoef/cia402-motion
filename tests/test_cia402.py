@@ -524,11 +524,13 @@ class PdoCheck(unittest.TestCase):
         r = pdo(['607A'], ['6064'], 'csp')
         self.assertEqual({f['object'] for f in at_level(r, 'error')}, {'0x6040', '0x6041'})
 
-    def test_switching_modes_needs_6060_and_6061(self):
+    def test_switching_modes_wants_6060_and_6061(self):
+        # By SDO and polling works too, only slower: warnings, not errors.
         r = pdo(['6040', '607A'], ['6041', '6064'], 'hm,csp')
-        errors = {f['object']: f['message'] for f in at_level(r, 'error')}
-        self.assertEqual(set(errors), {'0x6060', '0x6061'})
-        self.assertIn('confirms a mode switch', errors['0x6061'])
+        self.assertEqual(at_level(r, 'error'), [])
+        warnings = {f['object']: f['message'] for f in at_level(r, 'warning')}
+        self.assertEqual(set(warnings), {'0x6060', '0x6061'})
+        self.assertIn('confirms a mode switch', warnings['0x6061'])
 
     def test_6060_written_but_never_confirmed(self):
         r = pdo(['6040', '6060', '607A'], ['6041', '6064'], 'csp')
@@ -664,7 +666,11 @@ class PdoCheck(unittest.TestCase):
         tx = ['6041', '6061', '6064', '603F', '6841', '6864', '683F']
         r = pdo(rx, tx, 'hm,csp')
         self.assertEqual([(f['object'], f['level'], f['axis']) for f in r['findings']],
-                         [('0x6861', 'error', 2)])
+                         [('0x6861', 'warning', 2)])
+
+    def test_touch_probe_text_on_axis_2(self):
+        r = pdo(['6840', '6860', '687A'], ['6841', '6861', '6864', '683F', '68B9'], 'csp')
+        self.assertIn('(0x68BA-0x68BD)', at_level(r, 'warning')[0]['message'])
 
     def test_axis_range(self):
         self.assertEqual(cia402._profile_object(0x9840), (8, 0x6040))

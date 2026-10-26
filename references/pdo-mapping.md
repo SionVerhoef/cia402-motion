@@ -14,15 +14,17 @@ python3 scripts/cia402.py pdo --mode hm,csp --rx 0x60400010 0x60600008 0x607A002
 
 Entries are hexadecimal, written `6040`, `0x607A:00`, or as the 32-bit mapping value read from
 a mapping object (`0x60400010`: index 0x6040, subindex 0, 16 bits). Commas also separate.
-`--mode` takes every mode the axis runs in, comma-separated. A finding is one of:
+`--mode` takes every mode the axis runs in, comma-separated. A list that starts with a negative
+code needs the `=` form, `--mode=-3,csp`. A finding is one of:
 
 - **error**: the mode cannot be run like this. Exit status 1.
   - the controlword or the statusword is missing
   - the set-point of a cyclic mode or IP is missing, or in CSP the actual position 0x6064
-  - 0x6060/0x6061 are missing although the axis switches modes
   - an object is in the wrong direction, or has the wrong length or subindex
 - **warning**: it runs, but slowly or blind somewhere:
   - the set-point of PP, PV, PT or VL is missing, so every new one needs an SDO write
+  - 0x6060/0x6061 are missing although the axis switches modes, so each switch needs an SDO
+    write and polling 0x6061
   - 0x6060 mapped without 0x6061
   - no feedback a mode normally needs
   - a touch probe armed without its status, or status without a latched value
@@ -59,7 +61,7 @@ with "(warning)" where the tool warns instead of failing:
 | CSV | 0x60FF | 0x6064 (warning) |
 | CST | 0x6071 | 0x6064 (warning) |
 | CSTCA | 0x6071 and 0x60EA | — |
-| More than one mode | + 0x6060 | + 0x6061 |
+| More than one mode | + 0x6060 (warning) | + 0x6061 (warning) |
 
 Worth adding:
 

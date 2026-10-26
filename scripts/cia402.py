@@ -964,9 +964,11 @@ def _axis_findings(axis, mapped, modes, add):
     rules = {('rx', 0x6040): ['error', ['every command to the drive goes through it'], []],
              ('tx', 0x6041): ['error', ['without it the master cannot see the state'], []]}
     if len(modes) > 1:
-        rules[('rx', 0x6060)] = ['error', ['it switches between the modes'], []]
-        rules[('tx', 0x6061)] = ['error', ['it confirms a mode switch before the new mode '
-                                           'is used'], []]
+        # Switching by SDO and polling 0x6061 works too, only slower: a warning.
+        rules[('rx', 0x6060)] = ['warning', ['it switches between the modes; without it, '
+                                             'each switch needs an SDO write'], []]
+        rules[('tx', 0x6061)] = ['warning', ['it confirms a mode switch before the new mode '
+                                             'is used; without it, poll 0x6061 by SDO'], []]
     for key in keys:
         for pdo, base, level, why in PDO_RULES[key]:
             rule = rules.setdefault((pdo, base), [level, [], []])
@@ -997,8 +999,9 @@ def _axis_findings(axis, mapped, modes, add):
         add('warning', 'tx', at(0x60B9), f'{_label(at(0x60B9))} is not in the TxPDO: a latch '
                                          f'is armed but never seen.', axis)
     if has(0x60B9, 'tx') and not any(present(b) for b in (0x60BA, 0x60BB, 0x60BC, 0x60BD)):
-        add('warning', 'tx', at(0x60BA), 'Touch probe status is mapped, but no latched '
-                                         'position (0x60BA-0x60BD).', axis)
+        add('warning', 'tx', at(0x60BA), f'Touch probe status is mapped, but no latched '
+                                         f'position (0x{at(0x60BA):04X}-0x{at(0x60BD):04X}).',
+            axis)
     for base, users in SETPOINT_OF.items():
         if has(base, 'rx') and keys and not set(users) & set(keys):
             add('note', 'rx', at(base), f'{_label(at(base))} is the set-point of '
@@ -1232,7 +1235,9 @@ def main(argv=None):
 
     p = sub.add_parser('pdo', help='check a PDO mapping against the modes it must run')
     p.add_argument('--mode', required=True,
-                   help='mode or modes the axis runs in, comma-separated: e.g. csp, hm,csp')
+                   help='mode or modes the axis runs in, comma-separated: e.g. csp, hm,csp. '
+                        'A list that starts with a negative code needs the = form: '
+                        '--mode=-3,csp')
     p.add_argument('--rx', nargs='+', action='extend', default=[], metavar='ENTRY',
                    help='RxPDO entries (master to drive), in hex: 6040, 0x607A:00 or a '
                         'mapping value such as 0x60400010')
