@@ -54,8 +54,8 @@ To remap, in Pre-operational:
 4. Write :00 = the number of entries.
 5. Write the COB-ID again with bit 31 clear.
 
-`cia402.py pdo` checks the result against the mode. It takes the mapping values exactly as read
-back from 0x1600:01….
+`cia402.py pdo` checks the result against the mode. It takes the mapping values in hex, exactly
+as read back from 0x1600:01….
 
 ## Transmission types
 

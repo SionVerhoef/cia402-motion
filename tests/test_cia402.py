@@ -276,7 +276,7 @@ class Controlword(unittest.TestCase):
     def test_commands(self):
         cases = {0x0006: ('Shutdown', [2, 6, 8]),
                  0x0007: ('Switch on / Disable operation', [3, 5]),
-                 0x000F: ('Enable operation', [4, 16]),
+                 0x000F: ('Enable operation', [3, 4, 16]),
                  0x0000: ('Disable voltage', [7, 9, 10, 12]),
                  0x0002: ('Quick stop', [7, 10, 11]), 0x0080: ('Fault reset', [15]),
                  0x000E: ('Shutdown', [2, 6, 8]), 0x0004: ('Disable voltage', [7, 9, 10, 12]),
@@ -585,20 +585,134 @@ class PdoCheck(unittest.TestCase):
         self.assertIn('Mode -3 is manufacturer-specific', notes)
         self.assertEqual(at_level(r, 'error'), [])
 
-    def test_beckhoff_mdp742_is_named(self):
-        r = pdo(['7010:01'], ['6010:01'], 'csp')
-        notes = [f['message'] for f in at_level(r, 'note')]
-        self.assertTrue(any('MDP742' in n for n in notes))
-        self.assertFalse(any('object table' in n for n in notes))
+    def test_beckhoff_mdp742_alone_is_named_not_failed(self):
+        for rx, tx in ((['7010:01', '7010:03'], ['6010:01', '6010:03']), (['7010'], ['6010']),
+                       (['0x70100110'], [])):
+            with self.subTest(rx=rx, tx=tx):
+                r = pdo(rx, tx, 'csp')
+                self.assertEqual(r['axes'], [])
+                self.assertEqual([f['level'] for f in r['findings']], ['note'])
+                self.assertIn('MDP742', r['findings'][0]['message'])
+                self.assertIn('nothing else was checked', r['findings'][0]['message'])
+
+    def test_beckhoff_mdp742_mixed_with_cia402_is_still_checked(self):
+        r = pdo(['7010:01', '607A'], ['6010:01', '6064'], 'csp')
         self.assertIn('0x6040', {f['object'] for f in at_level(r, 'error')})
+        notes = [f['message'] for f in at_level(r, 'note')]
+        self.assertTrue(any('MDP742' in n and 'nothing else' not in n for n in notes))
+
+    def test_the_same_mode_twice_is_one_mode(self):
+        r = pdo(['6040', '607A'], ['6041', '6064', '603F'], 'csp,8')
+        self.assertEqual([m['code'] for m in r['modes']], [8])
+        self.assertEqual(at_level(r, 'error'), [])
+
+    def test_wrong_direction_is_not_also_reported_missing(self):
+        for rx, tx, obj in ((['6040', '607A', '6060', '6061'], ['6041', '6064'], '0x6061'),
+                            (['6040', '607A', '60B8', '60B9'], ['6041', '6064'], '0x60B9'),
+                            (['6040', '607A', '603F'], ['6041', '6064'], '0x603F')):
+            with self.subTest(obj=obj):
+                r = pdo(rx, tx, 'csp')
+                about = [(f['level'], f['message']) for f in r['findings'] if f['object'] == obj]
+                self.assertEqual(len(about), 1, about)
+                self.assertIn('belongs in the TxPDO', about[0][1])
+
+    def test_an_axis_seen_only_through_one_object(self):
+        r = pdo(['6040', '6060', '607A'], ['6041', '6061', '6064', '603F', '6864'], 'csp')
+        self.assertEqual([(f['object'], f['level'], f['axis']) for f in r['findings']],
+                         [('0x6840', 'warning', 2)])
+        self.assertIn('0x6864', r['findings'][0]['message'])
+
+    # What dropping one entry from a GOOD mapping must report, written out here.
+    NEEDS = {
+        # Profile modes can take the set-point by SDO; cyclic modes cannot.
+        'pp': {'607A': 'warning', '6064': 'warning'},
+        'vl': {'6042': 'warning'},
+        'pv': {'60FF': 'warning', '606C': 'warning'},
+        'pt': {'6071': 'warning'},
+        'hm': {'6064': 'warning'},
+        'ip': {'60C1:01': 'error', '6064': 'warning'},
+        'csp': {'607A': 'error', '6064': 'error'},
+        'csv': {'60FF': 'error', '6064': 'warning'},
+        'cst': {'6071': 'error', '6064': 'warning'},
+        'cstca': {'6071': 'error', '60EA': 'error'},
+    }
+
+    def test_each_mode_reports_what_it_lacks(self):
+        self.assertEqual(set(self.NEEDS), set(self.GOOD))
+        for mode, (rx, tx) in self.GOOD.items():
+            rx, tx = rx + ['6060'], tx + ['6061', '603F']
+            for pdo_name, entries in (('rx', rx), ('tx', tx)):
+                for dropped in entries:
+                    level = dict(self.NEEDS[mode], **{'6040': 'error', '6041': 'error',
+                                                      '6061': 'warning', '603F': 'note'})
+                    expected = level.get(dropped)
+                    with self.subTest(mode=mode, dropped=dropped):
+                        kept = [e for e in entries if e != dropped]
+                        r = pdo(kept, tx, mode) if pdo_name == 'rx' else pdo(rx, kept, mode)
+                        index = f'0x{cia402.parse_entry(dropped)["index"]:04X}'
+                        got = [(f['object'], f['level']) for f in r['findings']]
+                        self.assertEqual(got, [(index, expected)] if expected else [])
+
+    def test_the_stricter_mode_wins(self):
+        r = pdo(['6040', '6060', '607A'], ['6041', '6061'], 'hm,csp')
+        self.assertEqual([(f['object'], f['level']) for f in r['findings']],
+                         [('0x6064', 'error'), ('0x603F', 'note')])
+        self.assertIn('(HM/CSP)', r['findings'][0]['message'])
+
+    def test_an_axis_is_not_satisfied_by_another_axis(self):
+        rx = ['6040', '6060', '607A', '6840', '6860', '687A']
+        tx = ['6041', '6061', '6064', '603F', '6841', '6864', '683F']
+        r = pdo(rx, tx, 'hm,csp')
+        self.assertEqual([(f['object'], f['level'], f['axis']) for f in r['findings']],
+                         [('0x6861', 'error', 2)])
+
+    def test_axis_range(self):
+        self.assertEqual(cia402._profile_object(0x9840), (8, 0x6040))
+        self.assertEqual(cia402._profile_object(0xA040), (None, None))
+        self.assertEqual(cia402._profile_object(0x6502), (None, None))  # not a PDO object
+
+    def test_same_entry_in_two_forms_is_mapped_twice(self):
+        r = pdo(['6040', '0x60400010', '607A'], ['6041', '6064'], 'csp')
+        warnings = at_level(r, 'warning')
+        self.assertEqual([(f['object'], f['axis']) for f in warnings], [('0x6040', 1)])
+        self.assertIn('mapped twice', warnings[0]['message'])
+
+    def test_object_table(self):
+        # Direction and size of the objects the checks lean on, from the profile.
+        expect = {0x603F: ('tx', 16), 0x6040: ('rx', 16), 0x6041: ('tx', 16),
+                  0x6042: ('rx', 16), 0x6060: ('rx', 8), 0x6061: ('tx', 8),
+                  0x6064: ('tx', 32), 0x606C: ('tx', 32), 0x6071: ('rx', 16),
+                  0x6077: ('tx', 16), 0x607A: ('rx', 32), 0x60B8: ('rx', 16),
+                  0x60B9: ('tx', 16), 0x60BA: ('tx', 32), 0x60C1: ('rx', 32),
+                  0x60EA: ('rx', 16), 0x60F4: ('tx', 32), 0x60FF: ('rx', 32)}
+        for index, (direction, bits) in expect.items():
+            with self.subTest(index=hex(index)):
+                self.assertEqual(cia402.OBJECTS[index][1:3], (direction, bits))
+
+    def test_text_shows_every_finding(self):
+        args = ['pdo', '--mode', 'csp', '--rx', '6040', '607A', '60B8', '6840',
+                '--tx', '6041', '6064']
+        _, text = run_main(args + ['--json'])
+        result = json.loads(text)
+        self.assertEqual(set(result['findings'][0]), {'level', 'pdo', 'object', 'axis',
+                                                      'message'})
+        _, text = run_main(args)
+        lines = [l.strip() for l in text.splitlines()]
+        found = [l.split(None, 1) for l in lines if l.split(None, 1)[0] in cia402.LEVELS]
+        self.assertEqual(found, [[f['level'], f['message']] for f in result['findings']])
+        c = result['counts']
+        self.assertIn(f'result: {c["error"]} error(s), {c["warning"]} warning(s), '
+                      f'{c["note"]} note(s)', text)
 
     def test_entry_formats(self):
         for text in ('6040', '0x6040', '16#6040', '6040h', ' 0X6040 '):
             with self.subTest(text=text):
                 self.assertEqual(cia402.parse_entry(text),
                                  {'index': 0x6040, 'sub': None, 'bits': None})
-        self.assertEqual(cia402.parse_entry('0x607A:00'),
-                         {'index': 0x607A, 'sub': 0, 'bits': None})
+        for text in ('0x607A:00', '607A:0x00', '16#607A:16#00', '607Ah:00h'):
+            with self.subTest(text=text):
+                self.assertEqual(cia402.parse_entry(text),
+                                 {'index': 0x607A, 'sub': 0, 'bits': None})
         self.assertEqual(cia402.parse_entry('0x60400010'),
                          {'index': 0x6040, 'sub': 0, 'bits': 16})
         self.assertEqual(cia402.parse_entry('60C1_0120'),
@@ -667,7 +781,7 @@ class Output(unittest.TestCase):
         self.assertIn('   3  fault', text)
         self.assertIn('write 0x0000 (hold bit 7 low)', text)
         _, text = run_main(['decode', 'cw', '0x001F', '--mode', 'pp'])
-        self.assertIn('command: Enable operation (T4, T16', text)
+        self.assertIn('command: Enable operation (T3, T4, T16', text)
         self.assertIn('   4  new set-point (rising edge)', text)
         _, text = run_main(['decode', 'modes', '0x0080'])
         self.assertIn('CSP', text)
@@ -696,6 +810,7 @@ class CommandLine(unittest.TestCase):
         ['plan', 'qsa', 'oe', '--quick-stop-stays'],
         ['plan', 'oe', 'sod'],
         ['pdo', '--mode', 'hm,csp', '--rx', '6040,6060,607A', '--tx', '6041', '6061', '6064'],
+        ['pdo', '--mode', '-3', '--rx', '6040', '--tx', '6041'],
     ]
 
     def run_cli(self, args):
@@ -734,6 +849,19 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn(b'0x607A Target position is not in the RxPDO', r.stdout)
         self.assertEqual(r.stderr, b'')
+
+    def test_pdo_check_with_warnings_only_exits_0(self):
+        r = self.run_cli(['pdo', '--mode', 'csp', '--rx', '6040', '607A', '6060',
+                          '--tx', '6041', '6064'])
+        self.assertEqual(r.returncode, 0)
+        self.assertIn(b'never confirmed', r.stdout)
+
+    def test_repeated_pdo_options_add_up(self):
+        r = self.run_cli(['pdo', '--mode', 'csp', '--rx', '6040', '--rx', '607A',
+                          '--tx', '6041', '--tx', '6064', '--json'])
+        result = json.loads(r.stdout)
+        self.assertEqual([e['index'] for e in result['rx']], ['0x6040', '0x607A'])
+        self.assertEqual(result['counts']['error'], 0)
 
 
 if __name__ == '__main__':

@@ -32,7 +32,8 @@ beyond the probe inputs are vendor-defined.
 ## Using it
 
 1. Map 0x60B8 into the RxPDO, and 0x60B9 plus the edge value you need into the TxPDO.
-   `cia402.py pdo` warns when one of the pair is missing.
+   `cia402.py pdo` warns when 0x60B8 is mapped without 0x60B9, and when 0x60B9 is mapped
+   without any edge value.
 2. Arm: enable bit plus the edge bit, e.g. 0x0011 for probe 1 on its input, rising edge, first
    event only.
 3. Wait for the stored bit in 0x60B9, then read the position.

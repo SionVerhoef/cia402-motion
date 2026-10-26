@@ -17,7 +17,7 @@ indices, bit numbers and code values are stated as facts, as the sources below r
 
 | Source | Licence | How it was used |
 |---|---|---|
-| [python-canopen](https://github.com/canopen-python/canopen) (`canopen.profiles.p402`) | MIT | Test oracle only. `tests/test_canopen_oracle.py` imports it when installed, and CI checks the state of every statusword, the homing phases, the commanded transitions, the mode codes with their 0x6502 bits, and the homing-method directions against it. Not bundled. |
+| [python-canopen](https://github.com/canopen-python/canopen) (`canopen.profiles.p402`) | MIT | Test oracle only. `tests/test_canopen_oracle.py` imports it when installed, and CI checks the state of every statusword, the homing phases, the commanded transitions, the mode codes with their 0x6502 bits (mode 11 excepted: python-canopen stops at 10), and the homing-method directions against it. Not bundled. |
 | maxon EPOS4 Firmware Specification (edition 2026-07) | All rights reserved | Read. The meaning of the mode-specific controlword and statusword bits is restated as facts; EPOS4's own behaviour is on `references/vendors/maxon.md`, named as EPOS4's. |
 | Beckhoff Information System, EL72x1-901x and EL72x1-001x documentation | All rights reserved | Read. MDP742 vs DS402, the DS402 objects, PDO sets and mode 11, restated on `references/vendors/beckhoff.md`. |
 | Omron 1S-series User's Manual I586-E1-19 | All rights reserved | Read. PDO and gear facts on `references/vendors/omron.md`. |

@@ -57,6 +57,8 @@ carries over between vendors.
 | 0x6080 | Max motor speed | UINT32 | | |
 | 0x6081 | Profile velocity | UINT32 | | PP move speed |
 | 0x60B1 | Velocity offset | INT32 | PDO | velocity feed-forward in CSP |
+| 0x6042 | vl target velocity | INT16 | PDO | VL set-point |
+| 0x6043 / 0x6044 | vl velocity demand / actual value | INT16 | PDO | |
 
 ## Torque and current
 
@@ -75,6 +77,7 @@ Torque and current are in thousandths of the rated value (0x6076, 0x6075).
 | 0x6087 | Torque slope | UINT32 | | PT ramp |
 | 0x60B2 | Torque offset | INT16 | PDO | torque feed-forward |
 | 0x60E0 / 0x60E1 | Positive / negative torque limit value | UINT16 | PDO | |
+| 0x60EA | Commutation angle | UINT16 | PDO | CSTCA, with 0x6071 (`vendors/beckhoff.md`) |
 
 ## Profiles and ramps
 

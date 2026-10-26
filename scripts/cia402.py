@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode CiA 402 drive words and plan state-machine transitions.
+"""Decode CiA 402 drive words, plan state-machine transitions and check PDO mappings.
 
     cia402.py decode sw 0x1637 --mode pp      statusword (0x6041), mode-aware
     cia402.py decode cw 0x001F --mode pp      controlword (0x6040)
@@ -13,7 +13,8 @@
                                               check a PDO mapping against the modes
 
 --json prints the same result for a program. A value is decimal, 0x or 16# hex, or
-0b or 2# binary; underscores are ignored, so 2#0001_0110 works.
+0b or 2# binary; underscores are ignored, so 2#0001_0110 works. PDO entries are object
+indices and always hex.
 
 Standard library only, so it runs on an engineering PC with nothing but Python 3.8.
 Bit numbers, object indices and code values are facts of the profile; every label
@@ -182,7 +183,8 @@ MODE_CW_BITS = (4, 5, 6, 9)
 
 # Modes of operation (0x6060 / 0x6061). Bit (code - 1) of 0x6502 says a drive
 # supports the mode. Negative codes are manufacturer-specific. Mode 11 is taken from
-# Beckhoff's EL72x1 in DS402 and TI's EtherCAT slave SDK; python-canopen stops at 10.
+# Beckhoff's EL72x1 in DS402 and TI's Industrial Communications SDK; python-canopen stops
+# at 10.
 MODES = {
     1: ('pp', 'Profile position'),
     2: ('vl', 'Velocity'),
@@ -499,7 +501,7 @@ def controlword_command(cw):
         return 'Shutdown', [2, 6, 8]
     if not cw & 0x08:
         return 'Switch on / Disable operation', [3, 5]
-    return 'Enable operation', [4, 16]
+    return 'Enable operation', [3, 4, 16]  # in Ready to switch on: T3, then T4
 
 
 def decode_controlword(cw, mode=None):
@@ -578,7 +580,7 @@ def decode_mode(code):
     notes = []
     if code == 11:
         notes.append('Few drives offer mode 11. Beckhoff documents it for the EL72x1 in '
-                     'DS402, and TI\'s EtherCAT slave SDK lists it.')
+                     'DS402, and TI\'s Industrial Communications SDK lists it.')
     if kind == 'manufacturer':
         notes.append('Negative modes are manufacturer-specific: the same number can mean '
                      'different things on different drives. Look it up in this drive\'s '
@@ -824,20 +826,22 @@ AXIS_OFFSET = 0x800  # a multi-axis device repeats 0x6000-0x67FF once per axis
 LAST_AXIS = 8
 
 # What each mode needs in the cyclic exchange: (pdo, index, level, why). A level of
-# 'error' means the mode cannot be run from the master without it.
-WHERE_AXIS_IS = 'it says where the axis is, which target = actual before enabling needs'
+# 'error' means the mode cannot be run from the master without it. The profile modes
+# can take their set-point by SDO instead, so there a missing one is a warning.
 LOOP_IN_MASTER = 'a position loop closed in the master needs it every cycle'
+BY_SDO = 'without it, every new set-point needs an SDO write'
 PDO_RULES = {
-    'pp': [('rx', 0x607A, 'error', 'it carries the target of each move'),
-           ('tx', 0x6064, 'warning', WHERE_AXIS_IS)],
-    'vl': [('rx', 0x6042, 'error', 'it carries the set-point')],
-    'pv': [('rx', 0x60FF, 'error', 'it carries the set-point'),
+    'pp': [('rx', 0x607A, 'warning', f'it carries the target of each move; {BY_SDO}'),
+           ('tx', 0x6064, 'warning', 'it says where the axis is, which absolute moves are '
+                                     'planned from')],
+    'vl': [('rx', 0x6042, 'warning', f'it carries the set-point; {BY_SDO}')],
+    'pv': [('rx', 0x60FF, 'warning', f'it carries the set-point; {BY_SDO}'),
            ('tx', 0x606C, 'warning', 'it shows the speed reached')],
-    'pt': [('rx', 0x6071, 'error', 'it carries the set-point')],
+    'pt': [('rx', 0x6071, 'warning', f'it carries the set-point; {BY_SDO}')],
     'hm': [('tx', 0x6064, 'warning', 'it gives the homed position, which the next mode '
                                      'starts from')],
     'ip': [('rx', 0x60C1, 'error', 'it carries the set-points'),
-           ('tx', 0x6064, 'warning', WHERE_AXIS_IS)],
+           ('tx', 0x6064, 'warning', 'the interpolation points start from it')],
     'csp': [('rx', 0x607A, 'error', 'it carries the set-point every cycle'),
             ('tx', 0x6064, 'error', 'the trajectory starts from it, and target = actual '
                                     'before enabling needs it')],
@@ -850,25 +854,26 @@ PDO_RULES = {
               ('rx', 0x60EA, 'error', 'it carries the commutation angle every cycle')],
 }
 LEVELS = ('error', 'warning', 'note')
-MDP742 = {(0x7010, 1), (0x6010, 1)}  # Beckhoff's controlword and statusword
+MDP742 = (0x7010, 0x6010)  # Beckhoff's drive outputs and inputs, controlword at :01
 SETPOINT_OF = {0x607A: ('pp', 'csp'), 0x60FF: ('pv', 'csv'),
                0x6071: ('pt', 'cst', 'cstca'), 0x60C1: ('ip',), 0x6042: ('vl',)}
+
+
+def _hex_digits(part):
+    """'607A' from 607A, 0x607A, 16#607A or 607Ah."""
+    for prefix in ('0x', '16#'):
+        if part.startswith(prefix):
+            return part[len(prefix):]
+    return part[:-1] if part.endswith('h') else part
 
 
 def parse_entry(text):
     """{'index', 'sub', 'bits'} from 6040, 0x607A:00, 6040h or a 32-bit mapping entry
     such as 0x60400010 (index, subindex, bit length). Always hexadecimal."""
-    s = text.strip().replace('_', '').lower()
-    for prefix in ('0x', '16#'):
-        if s.startswith(prefix):
-            s = s[len(prefix):]
-            break
-    if s.endswith('h'):
-        s = s[:-1]
-    index, _, sub = s.partition(':')
-    digits = index + sub
-    if not index or (':' in s and not sub) or any(c not in '0123456789abcdef'
-                                                  for c in digits):
+    index, colon, sub = text.strip().replace('_', '').lower().partition(':')
+    index, sub = _hex_digits(index), _hex_digits(sub)
+    if not index or (colon and not sub) or any(c not in '0123456789abcdef'
+                                               for c in index + sub):
         raise ValueError(f'not a PDO entry: {text!r}. Write the index in hex, e.g. 6040, '
                          f'0x607A:00 or the mapping value 0x60400010')
     if sub:
@@ -912,12 +917,14 @@ def _entry_findings(pdo, entries, mapped, add):
         index, sub, bits = e['index'], e['sub'], e['bits']
         if index < 0x0008:
             continue  # padding: a gap (0x0000) or a CANopen dummy entry
-        if (index, sub) in seen:
-            add('warning', pdo, index, f'{_label(index, sub)} is mapped twice.')
-        seen.add((index, sub))
-        if (index, sub) in MDP742:
-            continue  # one note in check_pdo() covers these
         axis, base = _profile_object(index)
+        # 6040 and 0x60400010 are the same entry: compare at the subindex actually used.
+        key = (index, sub if sub is not None else OBJECTS[base][3] if base else 0)
+        if key in seen:
+            add('warning', pdo, index, f'{_label(index)} is mapped twice.', axis)
+        seen.add(key)
+        if index in MDP742:
+            continue  # one note in check_pdo() covers these
         if base is None:
             if 0x2000 <= index < 0x6000:
                 what = 'is manufacturer-specific: its meaning is in the drive manual'
@@ -942,12 +949,16 @@ def _entry_findings(pdo, entries, mapped, add):
 
 
 def _axis_findings(axis, mapped, modes, add):
-    """Check that one axis has what its modes need, and that what it has fits."""
+    """Check that one axis has what its modes need."""
     def at(base):
         return base + (axis - 1) * AXIS_OFFSET
 
     def has(base, pdo):
         return pdo in mapped.get((axis, base), ())
+
+    def present(base):
+        # Mapped in either PDO: one in the wrong PDO was reported already.
+        return (axis, base) in mapped
 
     keys = [m[0] for m in modes if m[0]]
     rules = {('rx', 0x6040): ['error', ['every command to the drive goes through it'], []],
@@ -963,29 +974,29 @@ def _axis_findings(axis, mapped, modes, add):
             rule[1].append(why)
             rule[2].append(key.upper())
     for (pdo, base), (level, whys, needed_by) in rules.items():
-        if (axis, base) in mapped:
-            continue  # present, or already reported as mapped the wrong way
+        if present(base):
+            continue
         where = 'RxPDO' if pdo == 'rx' else 'TxPDO'
         by = f' ({"/".join(needed_by)})' if needed_by else ''
         add(level, pdo, at(base), f'{_label(at(base))} is not in the {where}: '
                                   f'{"; ".join(whys)}{by}.', axis)
 
-    if len(modes) == 1 and has(0x6060, 'rx') and not has(0x6061, 'tx'):
+    if len(modes) == 1 and has(0x6060, 'rx') and not present(0x6061):
         add('warning', 'tx', at(0x6061), f'{_label(at(0x6061))} is not in the TxPDO: the '
                                          f'mode written to 0x{at(0x6060):04X} is never '
                                          f'confirmed.', axis)
-    elif len(modes) == 1 and not has(0x6060, 'rx') and not has(0x6061, 'tx'):
+    elif len(modes) == 1 and not present(0x6060) and not present(0x6061):
         add('note', 'rx', at(0x6060), f'0x{at(0x6060):04X} is not mapped: write it by SDO at '
                                       f'start-up and read back 0x{at(0x6061):04X} before '
                                       f'enabling. A drive can power up in another mode.',
             axis)
-    if not has(0x603F, 'tx'):
+    if not present(0x603F):
         add('note', 'tx', at(0x603F), f'{_label(at(0x603F))} is not mapped: after a fault, '
                                       f'read it by SDO.', axis)
-    if has(0x60B8, 'rx') and not has(0x60B9, 'tx'):
+    if has(0x60B8, 'rx') and not present(0x60B9):
         add('warning', 'tx', at(0x60B9), f'{_label(at(0x60B9))} is not in the TxPDO: a latch '
                                          f'is armed but never seen.', axis)
-    if has(0x60B9, 'tx') and not any(has(b, 'tx') for b in (0x60BA, 0x60BB, 0x60BC, 0x60BD)):
+    if has(0x60B9, 'tx') and not any(present(b) for b in (0x60BA, 0x60BB, 0x60BC, 0x60BD)):
         add('warning', 'tx', at(0x60BA), 'Touch probe status is mapped, but no latched '
                                          'position (0x60BA-0x60BD).', axis)
     for base, users in SETPOINT_OF.items():
@@ -1004,6 +1015,7 @@ def check_pdo(rx, tx, modes):
         findings.append({'level': level, 'pdo': pdo, 'object': f'0x{index:04X}',
                          'axis': axis, 'message': message})
 
+    modes = list({m[1]: m for m in modes}.values())  # csp,8 is one mode, not a switch
     mapped = {}  # (axis, base index) -> the PDOs it is in
     _entry_findings('rx', rx, mapped, add)
     _entry_findings('tx', tx, mapped, add)
@@ -1011,18 +1023,32 @@ def check_pdo(rx, tx, modes):
         if not m[0]:
             add('note', 'rx', 0x6060, f'Mode {m[1]} is manufacturer-specific: this tool '
                                       f'cannot say which objects it needs.')
-    axes = sorted({axis for axis, _ in mapped}) or [1]
+    mdp742 = any(e['index'] in MDP742 for e in rx + tx)
+    if mdp742:
+        rest = (', so nothing else was checked' if not mapped else '')
+        add('note', 'rx', 0x7010, f'0x7010 and 0x6010 are Beckhoff\'s MDP742 drive profile '
+                                  f'(EL72x1 and others; controlword 0x7010:01, statusword '
+                                  f'0x6010:01), not CiA 402{rest}: see '
+                                  f'references/vendors/beckhoff.md.')
+    axes = sorted({axis for axis, _ in mapped}) or ([] if mdp742 else [1])
     for axis in axes:
+        if axis > 1 and not any((axis, b) in mapped for b in (0x6040, 0x6041)):
+            # A monitored value of another axis, or a typo: not an axis to command.
+            shown = ', '.join(f'0x{base + (axis - 1) * AXIS_OFFSET:04X}'
+                              for a, base in sorted(mapped) if a == axis)
+            add('warning', 'rx', 0x6040 + (axis - 1) * AXIS_OFFSET,
+                f'Axis {axis} appears only through {shown}, with no controlword or '
+                f'statusword: a typo, or an axis that is only monitored? Its other '
+                f'objects were not checked.', axis)
+            continue
         _axis_findings(axis, mapped, modes, add)
-    if any((e['index'], e['sub']) in MDP742 for e in rx + tx):
-        add('note', 'rx', 0x7010, 'Controlword 0x7010:01 and statusword 0x6010:01 are '
-                                  'Beckhoff\'s MDP742 drive profile (EL72x1 and others), not '
-                                  'CiA 402: see references/vendors/beckhoff.md.')
     findings.sort(key=lambda f: (LEVELS.index(f['level']), f['axis'] or 0))
 
     def listing(entries):
+        names = [_profile_object(e['index'])[1] for e in entries]
         return [{'index': f'0x{e["index"]:04X}', 'sub': e['sub'], 'bits': e['bits'],
-                 'name': _label(e['index']).partition(' ')[2] or None} for e in entries]
+                 'name': OBJECTS[base][0] if base else None}
+                for e, base in zip(entries, names)]
 
     return {'modes': [_mode_out(m) for m in modes], 'rx': listing(rx), 'tx': listing(tx),
             'axes': axes, 'findings': findings,
@@ -1081,7 +1107,7 @@ def render_controlword(r):
 def render_supported_modes(r):
     print(f'supported modes {r["hex"]} ({r["value"]})')
     for m in r['modes']:
-        print(f'  {m["code"]:>2}  {m["key"].upper():<4} {m["name"]}')
+        print(f'  {m["code"]:>2}  {m["key"].upper():<5} {m["name"]}')
     _print_notes(r['notes'])
 
 
@@ -1113,7 +1139,7 @@ def render_plan(r):
 
 def render_pdo(r):
     modes = ', '.join(m['key'].upper() if m['key'] else str(m['code']) for m in r['modes'])
-    axes = ', '.join(str(a) for a in r['axes'])
+    axes = ', '.join(str(a) for a in r['axes']) or 'none'
     print(f'pdo check, mode {modes}, axis {axes}')
     for pdo in ('rx', 'tx'):
         entries = ', '.join(' '.join(filter(None, (e['index'], e['name']))) for e in r[pdo])
@@ -1181,7 +1207,8 @@ def run_pdo(mode_text, rx_texts, tx_texts):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description='Decode CiA 402 drive words and plan state-machine transitions.')
+        description='Decode CiA 402 drive words, plan state-machine transitions and check '
+                    'PDO mappings.')
     sub = parser.add_subparsers(dest='verb', required=True)
 
     p = sub.add_parser('decode', help='decode a statusword, controlword, 0x6502, 0x6060 '
@@ -1189,7 +1216,7 @@ def main(argv=None):
     p.add_argument('what', help='sw | cw | modes | mode | method (or the object index)')
     p.add_argument('value', help='decimal, 0x / 16# hex, or 0b / 2# binary')
     p.add_argument('--mode', help='mode of operation for the mode-specific bits: '
-                                  'pp, pv, pt, hm, ip, csp, csv, cst, cstca or a 0x6060 '
+                                  'pp, vl, pv, pt, hm, ip, csp, csv, cst, cstca or a 0x6060 '
                                   'code')
     p.add_argument('--json', action='store_true', help='machine-readable output')
 
@@ -1206,10 +1233,10 @@ def main(argv=None):
     p = sub.add_parser('pdo', help='check a PDO mapping against the modes it must run')
     p.add_argument('--mode', required=True,
                    help='mode or modes the axis runs in, comma-separated: e.g. csp, hm,csp')
-    p.add_argument('--rx', nargs='+', default=[], metavar='ENTRY',
+    p.add_argument('--rx', nargs='+', action='extend', default=[], metavar='ENTRY',
                    help='RxPDO entries (master to drive), in hex: 6040, 0x607A:00 or a '
                         'mapping value such as 0x60400010')
-    p.add_argument('--tx', nargs='+', default=[], metavar='ENTRY',
+    p.add_argument('--tx', nargs='+', action='extend', default=[], metavar='ENTRY',
                    help='TxPDO entries (drive to master), in the same form')
     p.add_argument('--json', action='store_true', help='machine-readable output')
 

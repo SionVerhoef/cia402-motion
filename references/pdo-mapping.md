@@ -17,20 +17,25 @@ a mapping object (`0x60400010`: index 0x6040, subindex 0, 16 bits). Commas also 
 `--mode` takes every mode the axis runs in, comma-separated. A finding is one of:
 
 - **error**: the mode cannot be run like this. Exit status 1.
-  - the controlword, statusword or a mode's set-point is missing
+  - the controlword or the statusword is missing
+  - the set-point of a cyclic mode or IP is missing, or in CSP the actual position 0x6064
   - 0x6060/0x6061 are missing although the axis switches modes
   - an object is in the wrong direction, or has the wrong length or subindex
-- **warning**: it runs, but blind somewhere:
+- **warning**: it runs, but slowly or blind somewhere:
+  - the set-point of PP, PV, PT or VL is missing, so every new one needs an SDO write
   - 0x6060 mapped without 0x6061
   - no feedback a mode normally needs
   - a touch probe armed without its status, or status without a latched value
   - an entry mapped twice
+  - another axis appears through an object or two, with no controlword or statusword
+    (a typo, or an axis only monitored); its other objects are not checked
 - **note**: worth knowing:
-  - 0x6060 not mapped, so write it by SDO at start-up
+  - neither 0x6060 nor 0x6061 mapped, so write the mode by SDO at start-up
   - 0x603F not mapped
   - a set-point of a mode not selected
   - manufacturer-specific objects
-  - Beckhoff's MDP742 indices
+  - Beckhoff's MDP742 indices. A mapping of MDP742 objects alone gets this note and nothing
+    else, since it is not a CiA 402 mapping.
 
 The tool knows the profile, not the drive. Whether *this* drive lets you map an object, how many
 entries a PDO takes, and which predefined sets it offers are device facts: ask **ethercat-esi**,
@@ -39,18 +44,21 @@ or read the ESI/EDS file. Why a drive *rejects* a mapping (an SDO abort, AL stat
 
 ## The minimum per mode
 
-Always the controlword 0x6040 in the RxPDO and the statusword 0x6041 in the TxPDO. On top:
+Always the controlword 0x6040 in the RxPDO and the statusword 0x6041 in the TxPDO. On top,
+with "(warning)" where the tool warns instead of failing:
 
 | Mode | RxPDO (master → drive) | TxPDO (drive → master) |
 |---|---|---|
-| PP | 0x607A | 0x6064 (warning if missing) |
-| PV | 0x60FF | 0x606C (warning) |
-| PT | 0x6071 | — |
+| PP | 0x607A (warning) | 0x6064 (warning) |
+| VL | 0x6042 (warning) | — |
+| PV | 0x60FF (warning) | 0x606C (warning) |
+| PT | 0x6071 (warning) | — |
 | HM | — (0x6098 by SDO) | 0x6064 (warning) |
 | IP | 0x60C1:01 | 0x6064 (warning) |
 | CSP | 0x607A | 0x6064 |
 | CSV | 0x60FF | 0x6064 (warning) |
 | CST | 0x6071 | 0x6064 (warning) |
+| CSTCA | 0x6071 and 0x60EA | — |
 | More than one mode | + 0x6060 | + 0x6061 |
 
 Worth adding:
@@ -86,12 +94,14 @@ invalid while it is remapped: `canopen-transport.md`.
 ## Multi-axis devices
 
 Axis n uses 0x6000–0x67FF shifted by (n − 1) × 0x800: axis 2 is 0x6840 / 0x6841 / 0x687A /
-0x6864. `cia402.py pdo` sorts the entries by axis and checks each one apart, so a missing
-0x6841 is reported against axis 2.
+0x6864. `cia402.py pdo` groups the entries by axis and checks each one apart, so a missing
+0x6841 is reported against axis 2. The JSON output carries the axis of each finding.
 
 ## Beckhoff MDP742
 
 An EL72x1 servo terminal in its default profile has no 0x6040/0x6041. Its controlword is
-0x7010:01 and its statusword 0x6010:01, from Beckhoff's own MDP742 drive profile. That is not
-a mapping error. It is a different profile, and `cia402.py pdo` says so when it sees those
-indices. `vendors/beckhoff.md` explains the two variants and how to switch.
+0x7010:01 and its statusword 0x6010:01, from Beckhoff's own MDP742 drive profile. The mapping
+is not broken: it belongs to a different profile. When `cia402.py pdo` sees 0x7010 or 0x6010 it
+names MDP742. A mapping of those alone it leaves at that, since it checks CiA 402 mappings only.
+Mixed with CiA 402 objects, the rest is checked as usual. `vendors/beckhoff.md` explains the two
+variants and how to switch.

@@ -65,7 +65,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 `tests/test_canopen_oracle.py` cross-checks statusword states, homing phases, commanded
-transitions, mode codes and homing-method directions against
+transitions, mode codes (all but mode 11, which it lacks) and homing-method directions against
 [python-canopen](https://github.com/canopen-python/canopen) when it is installed; CI installs it.
 
 ## Licence

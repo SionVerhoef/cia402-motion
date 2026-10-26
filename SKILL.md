@@ -105,5 +105,5 @@ CiA 402 part.
 
 Built from the profile as vendor manuals and permissive implementations restate it, and from
 the vendor documents named on each vendor page. `cia402.py` is tested against an independent
-model drive and against python-canopen. None of it has been run against a real drive: report
+model drive and against python-canopen (mode 11 excepted). None of it has been run against a real drive: report
 at that precision.

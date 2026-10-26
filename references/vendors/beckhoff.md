@@ -18,7 +18,7 @@ The -0000/-0001 family uses other pages and was not checked. Page numbers are gi
   0x6010:01, with modes of operation at 0x7010:03 and the display at 0x6010:03. Controlword bit 2
   and statusword bit 5 are quick stop (inverted) there. The value list of 0x6010:03 omits 8,
   although CSP can be selected through 0x7010:03 [1877540235, 1877535755]. `cia402.py pdo`
-  recognises these indices.
+  names MDP742 when a mapping contains 0x7010 or 0x6010.
 - **To get the DS402 objects, the EEPROM is updated with the DS402 ESI.** Beckhoff names no
   other way to switch, and the type name changes. The motor XML must match the profile, because
   the objects and process data differ [1859307019]. The update is done from the TwinCAT online
