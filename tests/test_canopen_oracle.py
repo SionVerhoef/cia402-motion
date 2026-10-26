@@ -32,6 +32,10 @@ NAMES = {
     'FAULT': 'fault',
 }
 
+# Mode 11 (CSTCA) comes from Beckhoff and TI documentation; canopen 2.4.1 stops at 10,
+# so nothing independent checks it.
+NOT_IN_CANOPEN = {11}
+
 # canopen's homing status names -> our phases
 PHASES = {
     'IN PROGRESS': 'in progress',
@@ -120,6 +124,10 @@ class AgainstCanopen(unittest.TestCase):
 
     def test_same_mode_codes_and_support_bits(self):
         for code, (key, _) in cia402.MODES.items():
+            if code in NOT_IN_CANOPEN:
+                # Fails once canopen adds the mode: then check it against ours.
+                self.assertNotIn(code, OperationMode.CODE2NAME)
+                continue
             with self.subTest(mode=key):
                 name = OperationMode.CODE2NAME[code]
                 bit = OperationMode.SUPPORTED[name]
