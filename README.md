@@ -36,9 +36,10 @@ python3 scripts/cia402.py plan fault --mode csp     # controlword sequence, with
   being called "unknown". With `--mode`, bits 10, 12 and 13 (and controlword 4–6, 9) get their
   meaning in that mode, and in homing mode the homing phase.
 - **`plan`** gives the controlwords from one state to another with their transition numbers:
-  fault reset as a real rising edge on bit 7, released afterwards; the mode switch confirmed on
-  0x6061; target = actual before enabling CSP; a controlled stop preferred over letting the
-  motor coast.
+  fault reset as a real rising edge on bit 7, released afterwards; the set-point made safe
+  (target = actual in CSP) before the mode switch, which is confirmed on 0x6061; a quick stop
+  left to finish rather than cut short; never Disable voltage straight from Operation enabled
+  (T9), and never a detour through Operation enabled on the way to another state.
 
 Add `--json` for machine-readable output.
 
@@ -48,9 +49,9 @@ Add `--json` for machine-readable output.
 python3 -m unittest discover -s tests -v
 ```
 
-`tests/test_canopen_oracle.py` cross-checks every statusword, homing phase, transition and mode
-bit against [python-canopen](https://github.com/canopen-python/canopen) when it is installed;
-CI installs it.
+`tests/test_canopen_oracle.py` cross-checks statusword states, homing phases, commanded
+transitions, mode codes and homing-method directions against
+[python-canopen](https://github.com/canopen-python/canopen) when it is installed; CI installs it.
 
 ## Licence
 

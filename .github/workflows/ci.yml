@@ -30,18 +30,19 @@ jobs:
           found=$(git ls-files '*.pdf' '*.PDF')
           [ -z "$found" ] || { echo "PDF files committed:"; echo "$found"; exit 1; }
 
-      - name: cia402.py runs with nothing installed
-        run: |
-          python scripts/cia402.py decode sw 0x0068
-          python scripts/cia402.py plan fault --mode csp
-
+      # Runs before anything is installed: the tool must need nothing but Python.
       - name: tests
         run: python -m unittest discover -s tests -v
 
+      # The README promises Python 3.8. setup-python may no longer offer it; uv does.
+      - uses: astral-sh/setup-uv@v5
+      - name: tests, on Python 3.8
+        run: uv run --no-project --python 3.8 python -m unittest discover -s tests
+
       # python-canopen (MIT) wrote its CiA 402 tables independently of ours, so it is the
-      # oracle: every statusword, homing phase, transition and mode bit must agree. The
-      # skill never needs it. The env var turns a missing install into a failure, so this
-      # step cannot pass by skipping.
+      # oracle for statusword states, homing phases, commanded transitions, mode codes and
+      # homing-method directions. The skill never needs it. The env var turns a missing
+      # install into a failure, so this step cannot pass by skipping.
       - name: cross-check against python-canopen
         env:
           CIA402_REQUIRE_CANOPEN: "1"

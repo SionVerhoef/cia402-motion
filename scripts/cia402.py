@@ -54,9 +54,10 @@ STATES = {
     },
     'quick_stop_active': {
         'name': 'Quick stop active', 'mask': 0x6F, 'value': 0x07,
-        'hint': 'Braking as 0x605A says. 0x0000 leaves to Switch on disabled (T12); '
-                '0x000F returns to Operation enabled (T16) only if 0x605A keeps the drive '
-                'in this state.',
+        'hint': 'Braking as 0x605A says. Let the stop finish: unless 0x605A keeps the '
+                'drive here, it moves to Switch on disabled by itself (T12). Only at '
+                'standstill: 0x0000 leaves (T12), and 0x000F returns to Operation enabled '
+                '(T16) if 0x605A keeps the drive here.',
     },
     'fault_reaction_active': {
         'name': 'Fault reaction active', 'mask': 0x4F, 'value': 0x0F,
@@ -80,7 +81,7 @@ UNCOMMANDABLE = ('not_ready_to_switch_on', 'fault_reaction_active', 'fault')
 
 # Numbered as in the profile. A controlword of None means the drive takes the
 # transition by itself; '*' is any state. The notes on transitions that leave
-# Operation enabled name the object that decides how the motor stops.
+# Operation enabled say how the motor stops.
 TRANSITIONS = [
     {'id': 1, 'from': 'not_ready_to_switch_on', 'to': 'switch_on_disabled',
      'controlword': None, 'command': 'automatic',
@@ -129,8 +130,8 @@ TRANSITIONS = [
 ]
 TRANSITION = {t['id']: t for t in TRANSITIONS}
 
-# Disable voltage from Operation enabled lets the motor coast. The planner prefers a
-# stop the drive controls, and takes T9 only when nothing else gets there.
+# T9 always cuts the power stage at once, so the planner avoids it: T5 and T8 stop the
+# motor as 0x605C / 0x605B say, which at least can be a ramp.
 STEP_COST = {9: 3}
 
 
@@ -226,12 +227,13 @@ HOMING_PHASES = {
     0x2400: 'error, at standstill',
 }
 
-# Before Operation enabled, the set-point must already be one the drive can follow
-# without a jump. Keyed by mode.
+# Before Operation enabled - and before a mode switch while enabled - the set-point
+# must already be one the drive can follow without moving. Keyed by mode.
 SETPOINT_BEFORE_ENABLE = {
     'csp': 'Copy the actual position (0x6064) into the target position (0x607A) and '
-           'keep sending it every cycle. Enabled with target != actual, the axis jumps '
-           'to the target.',
+           'keep sending it every cycle. With target != actual the drive goes for the '
+           'target at once: the axis jumps, or trips on following error.',
+    'vl': 'Set the target velocity (0x6042) to 0.',
     'csv': 'Set the target velocity (0x60FF) to 0.',
     'pv': 'Set the target velocity (0x60FF) to 0.',
     'cst': 'Set the target torque (0x6071) to 0.',
@@ -248,9 +250,13 @@ AFTER_ENABLE = {
     'csp': 'Start the trajectory from the actual position: the master sends a new target '
            'every cycle.',
 }
-CYCLIC_NOTE = ('Cyclic synchronous modes need a synchronised bus (EtherCAT distributed '
-               'clocks, or CANopen SYNC) and an interpolation period (0x60C2) equal to the '
-               'cycle. Sync errors are a network problem, not a state-machine one.')
+GENERIC_SETPOINT = ('Before enabling, the set-point of the mode in 0x6061 must not cause '
+                    'motion (in CSP: target 0x607A = actual 0x6064). Pass --mode for the '
+                    'exact steps.')
+CYCLIC_NOTE = ('Cyclic synchronous modes usually run on a synchronised bus (EtherCAT '
+               'distributed clocks, or CANopen SYNC) with the interpolation period (0x60C2) '
+               'equal to the cycle; check which synchronisation this drive requires. Sync '
+               'errors are a network problem, not a state-machine one.')
 WAIT_NOTE = ('Hold each controlword until the statusword shows the expected state (keep '
              'writing it every cycle if it travels in a PDO), give every wait a timeout, '
              'and decode the statusword again when one expires.')
@@ -269,12 +275,12 @@ def parse_number(text):
         if s.startswith(prefix):
             base, digits = b, s[len(prefix):]
             break
-    if base == 10 and not digits.isdigit():
-        raise ValueError(f'not a number: {text!r}. Hex needs a 0x or 16# prefix.')
-    try:
-        value = int(digits, base)
-    except ValueError:
-        raise ValueError(f'not a number: {text!r}') from None
+    # Check the digits ourselves: int() would also accept a sign or a second prefix.
+    allowed = {10: '0123456789', 16: '0123456789abcdef', 2: '01'}[base]
+    if not digits or any(c not in allowed for c in digits):
+        hint = ' Hex needs a 0x or 16# prefix.' if base == 10 else ''
+        raise ValueError(f'not a number: {text!r}.{hint}')
+    value = int(digits, base)
     return -value if negative else value
 
 
@@ -307,30 +313,37 @@ def resolve_mode(text):
         code = MODE_CODE[t]
     else:
         try:
-            code = parse_number(t)
+            code, _ = _signed8(parse_number(t), 'a mode')
         except ValueError:
             raise ValueError(f'unknown mode {text!r}: use one of '
                              f'{", ".join(MODE_CODE)} or a 0x6060 code') from None
     if code in MODES:
         key, name = MODES[code]
         return key, code, name
-    if -128 <= code < 0:
+    if code < 0:
         return None, code, f'manufacturer-specific mode {code}'
-    raise ValueError(f'mode {code} is not defined by the profile')
+    if code == 0:
+        return None, 0, 'no mode'
+    raise ValueError(f'mode {code} is not in this tool\'s table')
 
 
-def resolve_state(text):
-    """A state key from a name, an alias or a statusword value."""
+def resolve_state(text, allow_statusword=True):
+    """(state key, notices) from a name, an alias or, if allowed, a statusword value."""
     t = text.strip().lower().replace(' ', '_').replace('-', '_')
     if t in STATES:
         return t, []
     if t in ALIASES:
         return ALIASES[t], []
+    names = f'a state name or one of {", ".join(ALIASES)}'
+    if not allow_statusword:
+        raise ValueError(f'unknown state {text!r}: use {names}')
     try:
-        value = parse_number(text)
+        value, notices = _word(parse_number(text), 16, 'the statusword')
     except ValueError:
-        raise ValueError(f'unknown state {text!r}: use a state name, one of '
-                         f'{", ".join(ALIASES)}, or a statusword value') from None
+        raise ValueError(f'unknown state {text!r}: use {names}, or a statusword '
+                         f'value') from None
+    if notices:
+        raise ValueError(f'{notices[0]}; give the statusword as an unsigned value')
     result = decode_statusword(value)
     if result['state']:
         return result['state'], []
@@ -369,7 +382,7 @@ def _nearest_state(sw):
         return key, (f'Not a defined state: bits 0-2 say {STATES[key]["name"]}, but '
                      f'quick stop (bit 5) is 0, which that state does not allow. Treat it '
                      f'as {STATES[key]["name"]} and check how the drive reports bit 5.')
-    return None, (f'Not a defined state: bits 0-2 are {low:03b}, which no state uses '
+    return None, (f'Not a defined state: bits 2-0 are {low:03b}, which no state uses '
                   f'(they switch on in order 0, 1, 2). Check that this really is 0x6041.')
 
 
@@ -415,7 +428,7 @@ def decode_statusword(sw, mode=None):
     bits = _bit_table(sw, STATUSWORD_BITS, MODE_SW_BITS, 'sw', mode)
     is_set = {row['bit'] for row in bits if row['set']}
 
-    if current in ('fault', 'fault_reaction_active') and state:
+    if state == 'fault_reaction_active':
         notes.append('Read 0x603F for the error code.')
     if 4 not in is_set and current in ('switch_on_disabled', 'ready_to_switch_on'):
         notes.append('Voltage enabled (bit 4) is 0: no high voltage at the power stage, '
@@ -426,8 +439,8 @@ def decode_statusword(sw, mode=None):
                      'diagnostic objects.')
     if 9 not in is_set:
         notes.append('Remote (bit 9) is 0: the drive may not be acting on the controlword '
-                     '(a commissioning tool or keypad has control, or on some drives the '
-                     'network is not operational).')
+                     '(a commissioning tool or keypad has control). On maxon EPOS4 the bit '
+                     'shows instead whether the network is in NMT Operational.')
     if 11 in is_set:
         notes.append('Internal limit active (bit 11): a set-point or output is being '
                      'clamped by a position, velocity, current or torque limit.')
@@ -439,9 +452,14 @@ def decode_statusword(sw, mode=None):
     homing = None
     if mode and mode[0] == 'hm':
         phase = sw & 0x3400
-        homing = {'bits': f'0x{phase:04X}',
-                  'phase': HOMING_PHASES.get(phase, 'reserved: attained and error both set')}
-        notes.append(f'Homing: {homing["phase"]}.')
+        homing = {'bits': f'0x{phase:04X}', 'phase': None}
+        if state == 'operation_enabled':
+            homing['phase'] = HOMING_PHASES.get(phase, 'reserved: attained and error both '
+                                                       'set')
+            notes.append(f'Homing: {homing["phase"]}.')
+        else:
+            notes.append('Homing runs only in Operation enabled: bits 10, 12 and 13 report '
+                         'no homing progress in this state.')
     elif mode and mode[0] in ('pp', 'csp') and 13 in is_set:
         notes.append('Following error (bit 13): the position has deviated more than 0x6065 '
                      'for longer than 0x6066.')
@@ -488,11 +506,12 @@ def decode_controlword(cw, mode=None):
                      'Release it afterwards: every other command needs bit 7 = 0, so a '
                      'bit 7 held high can block the next transition.')
         if cw & 0x0F:
-            notes.append(f'Bits 0-3 are set as well (0x{cw & 0x0F:X}): drives differ in '
-                         f'whether they act on them while bit 7 is high.')
+            notes.append(f'Bits 0-3 are set as well (0x{cw & 0x0F:X}): the profile has no '
+                         f'command with bit 7 = 1 other than Fault reset, so what a drive '
+                         f'does with them is not defined.')
     if command == 'Enable operation':
-        notes.append('From Ready to switch on, many drives run T3 and T4 together on '
-                     '0x000F.')
+        notes.append('Sent in Ready to switch on, 0x000F means Switch on + Enable operation '
+                     '(T3, then T4), as maxon EPOS4 documents.')
     if 8 in is_set:
         notes.append('Halt (bit 8): the drive decelerates as 0x605D says and stays in '
                      'Operation enabled.')
@@ -525,7 +544,8 @@ def decode_supported_modes(value):
     notes = []
     reserved = [b for b in [4] + list(range(10, 16)) if value & (1 << b)]
     if reserved:
-        notes.append(f'Reserved {_bits(reserved)} set.')
+        notes.append(f'{_bits(reserved).capitalize()} set: not in this tool\'s table '
+                     f'(reserved, or a mode from a later edition of the profile).')
     vendor = [b for b in range(16, 32) if value & (1 << b)]
     if vendor:
         notes.append(f'Manufacturer-specific modes, {_bits(vendor)}: see the drive manual.')
@@ -545,11 +565,15 @@ def decode_mode(code):
     elif code < 0:
         key, name, kind = None, 'manufacturer-specific', 'manufacturer'
     else:
-        key, name, kind = None, 'reserved', 'reserved'
+        key, name, kind = None, 'not in this tool\'s table', 'unknown'
     notes = []
     if kind == 'manufacturer':
-        notes.append('Negative modes mean something different on every drive: look the '
-                     'number up in this drive\'s manual.')
+        notes.append('Negative modes are manufacturer-specific: the same number can mean '
+                     'different things on different drives. Look it up in this drive\'s '
+                     'manual.')
+    if kind == 'unknown':
+        notes.append('Reserved, or a mode added in a later edition of the profile: check '
+                     'the drive manual.')
     return {'object': '0x6060 / 0x6061', 'value': code, 'key': key, 'name': name,
             'kind': kind, 'notes': notes}
 
@@ -588,7 +612,7 @@ def decode_homing_method(n):
         notes.append('35 and 37 mean the same; drives accept one or both.')
     else:
         kind, text = 'reserved', 'reserved'
-    if kind == 'standard' and n <= 34:
+    if kind == 'standard' and n <= 30:
         notes.append('Which switch edge and which side of it count differ between '
                      'neighbouring numbers: check the method diagram in the drive manual.')
     return {'object': '0x6098', 'value': n, 'kind': kind, 'description': text,
@@ -617,9 +641,12 @@ def _transition_step(t):
 
 def _shortest_path(start, target, quick_stop_stays):
     """The cheapest list of commanded transitions from start to target. Ties go to the
-    lowest transition numbers, so a plan is always the same."""
+    lowest transition numbers, so a plan is always the same. A path never passes through
+    Operation enabled on its way somewhere else: that would put torque on the motor with
+    whatever set-point happens to be live."""
     edges = [t for t in TRANSITIONS
-             if t['controlword'] is not None and (t['id'] != 16 or quick_stop_stays)]
+             if t['controlword'] is not None and (t['id'] != 16 or quick_stop_stays)
+             and (t['to'] != 'operation_enabled' or target == 'operation_enabled')]
     queue = [(0, [], start)]
     done = set()
     while queue:
@@ -638,13 +665,18 @@ def _shortest_path(start, target, quick_stop_stays):
 
 
 def _mode_steps(mode):
+    """Set-point first, then the mode: switched while enabled, the drive follows the
+    new mode's set-point the moment 0x6061 changes."""
     key, code, name = mode
-    steps = [_step('prepare', note=f'Write 0x6060 = {code} ({name}) and wait until 0x6061 '
-                                   f'reads {code}. Until it does, the mode-specific bits '
-                                   f'still belong to the old mode.')]
-    if key in SETPOINT_BEFORE_ENABLE:
-        steps.append(_step('prepare', note=SETPOINT_BEFORE_ENABLE[key]))
-    return steps
+    setpoint = SETPOINT_BEFORE_ENABLE.get(
+        key, 'Set this mode\'s set-point so it cannot cause motion (a manufacturer-specific '
+             'mode: see the drive manual).')
+    return [
+        _step('prepare', note=setpoint),
+        _step('prepare', note=f'Write 0x6060 = {code} ({name}) and wait until 0x6061 reads '
+                              f'{code}. Until it does, the mode-specific bits still belong '
+                              f'to the old mode.'),
+    ]
 
 
 def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
@@ -654,6 +686,13 @@ def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
     if target in UNCOMMANDABLE:
         raise ValueError(f'{STATES[target]["name"]} cannot be commanded: the drive enters '
                          f'it by itself')
+    if target == 'quick_stop_active' and start not in ('operation_enabled',
+                                                       'quick_stop_active'):
+        raise ValueError(f'Quick stop active is reached only from Operation enabled (T11). '
+                         f'From {STATES[start]["name"]} a quick stop leads to Switch on '
+                         f'disabled; planning one would enable the motor just to stop it')
+    if mode and mode[1] == 0:
+        raise ValueError('mode 0 is no mode: give the mode to switch to')
     steps, notes = [], []
     state = start
     if state == 'not_ready_to_switch_on':
@@ -669,16 +708,34 @@ def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
             _step('write', 0x0080, 15, 'Fault reset', 'switch_on_disabled',
                   'If the drive stays in Fault, the cause is still there: read 0x603F.'),
             _step('write', 0x0000, None, 'release bit 7', 'switch_on_disabled',
-                  'Pause a few cycles before the next command: some drives ignore it, or '
-                  'fault again, when it follows the reset at once.'),
+                  'Pause a few cycles before the next command. A defensive habit: the '
+                  'open-source KickCAT master holds 0 after every reset so that the drive '
+                  'does not fault again.'),
         ]
         state = 'switch_on_disabled'
+    if state == 'quick_stop_active' and target != state:
+        # Disable voltage in the middle of the quick-stop ramp would cut the power stage
+        # and let the motor coast, so first let the stop finish.
+        if quick_stop_stays:
+            steps.append(_step('prepare', note='Wait until the quick stop has brought the '
+                                               'motor to a standstill.'))
+        else:
+            steps.append(_step(
+                'wait', None, 12, 'automatic', 'switch_on_disabled',
+                'Let the quick stop finish: unless 0x605A keeps the drive in Quick stop '
+                'active, it moves to Switch on disabled by itself once the motor has '
+                'stopped. If it stays, pass --quick-stop-stays.'))
+            state = 'switch_on_disabled'
 
     path = _shortest_path(state, target, quick_stop_stays)
     for t in path:
-        if t['to'] == 'operation_enabled' and mode:
-            steps += _mode_steps(mode)
-        steps.append(_transition_step(t))
+        step = _transition_step(t)
+        if t['to'] == 'operation_enabled':
+            if mode:
+                steps += _mode_steps(mode)
+            else:
+                step['note'] = ' '.join(filter(None, (t['note'], GENERIC_SETPOINT)))
+        steps.append(step)
     if start == target == 'operation_enabled' and mode:
         steps += _mode_steps(mode)
 
@@ -823,10 +880,8 @@ def run_decode(what, text, mode_text):
 
 
 def run_plan(start_text, target_text, mode_text, quick_stop_stays):
-    if target_text.strip()[:1].isdigit() or target_text.strip().startswith('-'):
-        raise ValueError('give the target as a state name, not a statusword')
     start, notices = resolve_state(start_text)
-    target, _ = resolve_state(target_text)
+    target, _ = resolve_state(target_text, allow_statusword=False)
     result = plan(start, target, resolve_mode(mode_text), quick_stop_stays)
     result['notes'] = notices + result['notes']
     return result, render_plan

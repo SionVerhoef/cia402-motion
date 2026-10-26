@@ -71,14 +71,42 @@ class AgainstCanopen(unittest.TestCase):
                 self.assertEqual(ours['state'], NAMES[theirs], hex(sw))
 
     def test_same_homing_phase_for_every_statusword(self):
+        # We report a phase only in Operation enabled, where homing runs.
         hm = cia402.resolve_mode('hm')
         for sw in range(0x10000):
+            ours = cia402.decode_statusword(sw, hm)
+            if ours['state'] != 'operation_enabled':
+                self.assertIsNone(ours['homing']['phase'], hex(sw))
+                continue
+            ours = ours['homing']['phase']
             theirs = canopen_homing(sw)
-            ours = cia402.decode_statusword(sw, hm)['homing']['phase']
             if theirs is None:
                 self.assertTrue(ours.startswith('reserved'), hex(sw))
             else:
                 self.assertEqual(ours, PHASES[theirs], hex(sw))
+
+    def test_same_homing_method_directions(self):
+        # canopen names its method constants by switch and direction.
+        for name in dir(Homing):
+            if not name.startswith('HM_ON_') or 'MECHANICAL' in name or 'FOLLOWING' in name:
+                continue  # negative methods: manufacturer-specific, nothing to compare
+            numbers = getattr(Homing, name)
+            for n in numbers if isinstance(numbers, tuple) else (numbers,):
+                with self.subTest(constant=name, method=n):
+                    ours = cia402.decode_homing_method(n)['description']
+                    if n > 16 and n < 31:
+                        ours = cia402.decode_homing_method(n - 16)['description']
+                        self.assertIn('without the index pulse',
+                                      cia402.decode_homing_method(n)['description'])
+                    for word in ('negative', 'positive'):
+                        if word in name.lower():
+                            self.assertIn(word, ours)
+                    if 'HOME_SWITCH' in name:
+                        self.assertIn('home switch', ours)
+                    if 'LIMIT_SWITCH' in name:
+                        self.assertIn('limit switch', ours)
+                    if 'CURRENT_POSITION' in name:
+                        self.assertIn('current position', ours)
 
     def test_same_commanded_transitions(self):
         automatic = {('START', 'NOT READY TO SWITCH ON'),

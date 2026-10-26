@@ -27,7 +27,8 @@ unless it was run on hardware.
 by hand:
 
 ```bash
-python3 scripts/cia402.py decode sw 0x1637 --mode pp   # statusword: state, mode bits, next step
+python3 scripts/cia402.py decode sw 0x0250             # statusword: state, notes, what to send next
+python3 scripts/cia402.py decode sw 0x1637 --mode hm   # with --mode: mode bits and homing phase
 python3 scripts/cia402.py decode cw 0x001F --mode pp   # controlword: which command it is
 python3 scripts/cia402.py decode modes 0x03ED          # 0x6502 supported modes
 python3 scripts/cia402.py decode mode -3               # 0x6060 / 0x6061 mode of operation

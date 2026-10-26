@@ -13,14 +13,14 @@ which licences may ship at all.
 
 | Source | What it contributed |
 |---|---|
-| CiA 402 / IEC 61800-7-201 (drive profile) | **Not read for this skill.** CiA 402 is for CiA members only, and IEC's terms forbid using its documents with AI tools. Object indices, bit numbers and code values are stated as facts, as public vendor manuals and permissive implementations restate them. No text, tables or figures from either document are reproduced. |
+| CiA 402 / IEC 61800-7-201 (drive profile) | **Not read for this skill.** The current CiA 402 parts are open to CiA members only ([CiA technical documents](https://www.can-cia.org/cia-groups/technical-documents)), and the [IEC webstore terms](https://webstore.iec.ch/en/terms-conditions) bar using IEC publications in AI tools without IEC's permission. Object indices, bit numbers and code values are stated as facts, as public vendor manuals and permissive implementations restate them. No text, tables or figures from either document are reproduced. |
 
 ## Code and documentation consulted
 
 | Source | Licence | How it was used |
 |---|---|---|
-| [python-canopen](https://github.com/canopen-python/canopen) (`canopen.profiles.p402`) | MIT | Test oracle only. `tests/test_canopen_oracle.py` imports it when installed, and CI checks every statusword, homing phase, commanded transition and mode bit against it. Not bundled. |
-| maxon EPOS4 Firmware Specification | All rights reserved | Read. The meaning of the mode-specific controlword and statusword bits is restated as facts. |
+| [python-canopen](https://github.com/canopen-python/canopen) (`canopen.profiles.p402`) | MIT | Test oracle only. `tests/test_canopen_oracle.py` imports it when installed, and CI checks the state of every statusword, the homing phases, the commanded transitions, the mode codes with their 0x6502 bits, and the homing-method directions against it. Not bundled. |
+| maxon EPOS4 Firmware Specification | All rights reserved | Read. The meaning of the mode-specific controlword and statusword bits is restated as facts; EPOS4's own behaviour (bit 9, 0x000F from Ready to switch on) is named as EPOS4's. |
 | [ICube Robotics `ethercat_driver_ros2`](https://github.com/ICube-Robotics/ethercat_driver_ros2) issue tracker | — | Field cases. Real statuswords from its logs are test values, among them the non-standard 0x0068 an EL7221 reported. |
 | [KickCAT](https://github.com/leducp/KickCAT) | CeCILL-C (read only) | Field practice for the fault reset: a real 0 → 1 edge on bit 7, and a pause before the next command. Restated; no code copied. |
 
