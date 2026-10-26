@@ -13,16 +13,17 @@ python3 evals/run_cells.py /tmp/scout-opus --model claude-opus-5-5 \
 
 `run_cells.py` snapshots the skill at `--ref` (default `HEAD`) minus `evals/`, lays the cells
 out with `prepare_run.py`, runs each in its own isolated headless Claude Code session, and
-writes `REPORT.txt`: cost per arm, and an audit that flags a baseline cell that read the
-skill or ran a shell command outside its cell, a skill cell that did not read `SKILL.md`, a
-write outside a cell, and a cell with no `answer.md`. The run directory must be outside
-every git repository. Rerunning the same command resumes. Its docstring says why each
-isolation flag is there.
+writes `REPORT.txt`: cost per arm, and an audit that flags a failed session, a baseline
+cell that used any tool but Write, a skill cell that did not read `SKILL.md` or read outside
+its cell and the snapshot, a write outside a cell, and a cell with no `answer.md`. It lists
+every shell command a skill cell ran, to be read. The run directory must be outside every
+git repository and holds one model; rerunning the same command resumes, retrying failed
+cells. Its docstring says why each isolation flag is there.
 
 `candidates.json` holds the scouting set: each task's prompt, the right answer in our own
 words, the traps to look for, and how to grade it as right, partly or wrong. Scouting is
 graded by hand. `results-scouting.md` has the verdicts and what follows from them.
 
-The baseline arm is told not to read the skill and gets only Write and Bash, so it can do
-hex arithmetic but cannot go looking for this repository. It is not otherwise handicapped,
-and the prompt tells it the subject. Telling it nothing would measure prompt luck instead.
+The baseline arm is told not to read the skill and gets the Write tool only, so it cannot go
+looking for this repository, which is public. It is not otherwise handicapped, and the prompt
+tells it the subject. Telling it nothing would measure prompt luck instead.
