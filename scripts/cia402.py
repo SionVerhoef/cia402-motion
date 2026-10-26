@@ -812,6 +812,7 @@ OBJECTS = {
     0x60C1: ('Interpolation data record', 'rx', 32, 1),
     0x60E0: ('Positive torque limit value', 'rx', 16, 0),
     0x60E1: ('Negative torque limit value', 'rx', 16, 0),
+    0x60EA: ('Commutation angle', 'rx', 16, 0),
     0x60F4: ('Following error actual value', 'tx', 32, 0),
     0x60FD: ('Digital inputs', 'tx', 32, 0),
     0x60FE: ('Digital outputs', 'rx', 32, 1),
@@ -843,7 +844,9 @@ PDO_RULES = {
             ('tx', 0x6064, 'warning', LOOP_IN_MASTER)],
     'cst': [('rx', 0x6071, 'error', 'it carries the set-point every cycle'),
             ('tx', 0x6064, 'warning', LOOP_IN_MASTER)],
-    'cstca': [('rx', 0x6071, 'error', 'it carries the torque set-point every cycle')],
+    # CSTCA as Beckhoff documents it for the EL72x1: torque plus the electrical angle.
+    'cstca': [('rx', 0x6071, 'error', 'it carries the torque set-point every cycle'),
+              ('rx', 0x60EA, 'error', 'it carries the commutation angle every cycle')],
 }
 LEVELS = ('error', 'warning', 'note')
 MDP742 = {(0x7010, 1), (0x6010, 1)}  # Beckhoff's controlword and statusword

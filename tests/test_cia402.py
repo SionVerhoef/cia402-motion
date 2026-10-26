@@ -501,7 +501,7 @@ class PdoCheck(unittest.TestCase):
         'csp': (['6040', '607A'], ['6041', '6064']),
         'csv': (['6040', '60FF'], ['6041', '6064']),
         'cst': (['6040', '6071'], ['6041', '6064']),
-        'cstca': (['6040', '6071'], ['6041']),
+        'cstca': (['6040', '6071', '60EA'], ['6041']),
     }
 
     def test_a_complete_mapping_raises_nothing(self):
