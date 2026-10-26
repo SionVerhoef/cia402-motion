@@ -30,7 +30,7 @@ Find the state from the statusword, then:
 |---|---|
 | **Not ready to switch on** for good | The drive is still booting or self-testing, or is missing its own configuration (motor data, feedback). Not a controlword problem: look at the drive's display or tool. |
 | **Switch on disabled** | 1. Is the master sending 0x0006, with bit 2 = 1 and bit 7 = 0? 0x000B, 0x0002 and anything with bit 7 set are not Shutdown. 2. Remote (bit 9) = 0: a commissioning tool or keypad may hold control. 3. STO or an enable input open: many drives sit in Switch on disabled (or Fault) until the STO circuit is closed. That is hardware, read only: `safety-boundary.md`. 4. A known firmware issue: `vendors/lenze.md`. |
-| **Ready to switch on**, no further | Voltage enabled (bit 4) = 0: no DC link or mains, or an open main contactor. Then check that 0x0007 is really sent. |
+| **Ready to switch on**, no further | Voltage enabled (bit 4) = 0: no DC link or mains, or an open main contactor. That holds on drives that use the profile's meaning; maxon EPOS4 sets bit 4 only once the power stage is on (`vendors/maxon.md`). Then check that 0x0007 is really sent. |
 | **Switched on**, no further | Is 0x000F really sent? Is a valid mode set (0x6061 ≠ 0)? Some drives refuse to enable without one. Is a brake or enable condition of the drive's own missing? 0x603F after the attempt. |
 | **Fault** | Read 0x603F *before* anything else. Then: the reset is an edge (0x0000 → 0x0080 → 0x0000), followed by 0x0006 → 0x0007 → 0x000F. A level 0x0080, 0x008F or 0x000F straight from Switch on disabled are the usual code bugs: `state-machine.md`. |
 | **Non-standard word** (e.g. 0x0068) | Treat as Fault if bit 3 is set. The tool says which bits clash. |
@@ -72,7 +72,8 @@ Find the state from the statusword, then:
 
 - **A quick stop it did not ask for**: is bit 2 dropping? A master that writes 0x0000 or 0x000B for
   a cycle on reconnect or start-up does this.
-- **Communication loss**: 0x6007 (CANopen), or the EtherCAT sync-manager watchdog
+- **Communication loss**: the reaction is set in 0x6007, on CANopen and on many EtherCAT drives
+  (maxon EPOS4 and LinMot, for example). On EtherCAT there is also the sync-manager watchdog
   (**ethercat-diagnostics**).
 - **STO opened** by the safety circuit: the drive is doing its job. Read only.
 - **A fault reaction**: 0x605E and 0x603F.

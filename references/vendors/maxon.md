@@ -14,6 +14,12 @@ brackets. Some items are firmware-dependent, and the firmware is named where it 
 - **Statusword bit 9 (remote) shows NMT Operational**, not local/remote control. Bit 15 is set
   when homing is attained and cleared on a position-counter overflow or a sensor error. Bits 8 and
   14 read 0 [§6.2.95].
+- **Statusword bit 4 means "power stage on"**, not "high voltage present". It is 0 in Switch on
+  disabled and Ready to switch on by design, and does not point at the mains [§6.2.95, table
+  6-148].
+- **T9 (Disable voltage from Operation enabled) first stops as 0x605B says**, then disables the
+  power stage. The profile switches off at once. With the default 0x605B = 0 the motor still
+  coasts [§2.2, table 2-6].
 - **A standstill window (0x30E0) holds** the transitions out of Operation enabled, and Fault
   reaction active → Fault, until the axis is at standstill [§6.2.73].
 

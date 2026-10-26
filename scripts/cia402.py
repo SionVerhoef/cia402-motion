@@ -439,8 +439,9 @@ def decode_statusword(sw, mode=None):
         notes.append('Read 0x603F for the error code.')
     if 4 not in is_set and current in ('switch_on_disabled', 'ready_to_switch_on'):
         notes.append('Voltage enabled (bit 4) is 0: no high voltage at the power stage, '
-                     'and Switch on (T3) needs it. Check the mains or DC-link supply '
-                     '(a drive that never sets bit 4 can ignore this).')
+                     'and Switch on (T3) needs it. Check the mains or DC-link supply. '
+                     '(maxon EPOS4 sets bit 4 only once the power stage is on, so there '
+                     'this is normal.)')
     if 7 in is_set:
         notes.append('Warning (bit 7): the drive keeps running; the cause is in its own '
                      'diagnostic objects.')

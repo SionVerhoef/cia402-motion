@@ -32,6 +32,7 @@ p. 48].
 
 ## Other
 
+- **Velocity is in rpm by factory setting** (0x60A9 = 0x00B44700) [NP5 §6, "Speed unit"].
 - **The following-error reaction is set in the manufacturer object 0x3700, not 0x605E.**
   0x6065 = 0xFFFFFFFF switches monitoring off [NP5 §6.2.2 p. 50].
 - **Manufacturer modes −1 (clock-direction) and −2 (auto setup).** The mode can be changed at any

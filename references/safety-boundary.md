@@ -45,7 +45,7 @@ worse than no code, because it makes people believe the hazard is handled.
   chosen and validated from the risk assessment.
 
 Stop categories, for orientation (functional, not safety-rated, when done by the controlword):
-Disable voltage is like a category 0 stop (power removed at once), a quick stop to Switch on
+Disable voltage is, on most drives, like a category 0 stop (power removed at once), a quick stop to Switch on
 disabled like category 1 (controlled stop, then power removed), halt like category 2 (controlled
 stop, power kept).
 

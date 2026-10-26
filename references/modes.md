@@ -63,7 +63,8 @@ Operation enabled.
 | CSV / CST | — | — | — | — | — | follows the command value | — |
 
 "—" is reserved in that mode: write 0, ignore on read. Halt (CW bit 8) belongs to the profile
-modes and homing. In the cyclic modes the master stops the axis through its set-points. CSTCA's
+modes. Whether it also works in homing differs: LinMot's does not (`vendors/linmot.md`). In the
+cyclic modes the master stops the axis through its set-points. CSTCA's
 bits are not in the table: no source read for this skill gives them. With `--mode`,
 `cia402.py decode sw|cw` applies this table.
 

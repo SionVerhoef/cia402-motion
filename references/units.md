@@ -29,9 +29,10 @@ Some drives use SI-unit objects (0x60A8 position, 0x60A9 velocity). Others put t
 manufacturer object, or allow it only at some cycle times. The vendor pages have the cases read
 for this skill. Ask **ethercat-esi** which of these objects a particular drive has.
 
-Velocity is usually user units per second and acceleration user units per second², unless
-0x6096, the SI-unit objects or a vendor object say otherwise. Masters differ in what they assume,
-so set it explicitly and test with a slow move of known length.
+The velocity unit differs between drives. Some use user units per second, scaled by 0x6096.
+maxon EPOS4, Synapticon and Nanotec's NP5 default to **rpm** through 0x60A9 (vendor pages).
+Masters differ in what they assume too. Read 0x60A9, 0x6096 or the manual, set the unit
+explicitly, and test with a slow move of known length.
 
 Torque and current are in thousandths of the rated values 0x6076 (mN·m) and 0x6075 (mA): 1000 is
 rated torque.

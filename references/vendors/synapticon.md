@@ -43,6 +43,8 @@ master that queues moves with bit 5 = 0, as on most drives, gets no motion.
 
 ## Units
 
+**Velocities are in rpm by default**, changed through 0x60A9 [OD, e.g. 0x60FF].
+
 **0x6091 gear ratio is the ratio between the motor shaft and the shaft carrying the position
 encoder**, not a user scaling. 0x6092 feed constant drives a virtual gear [OD p. 299]. Do not
 copy factor-group values from another vendor's drive.

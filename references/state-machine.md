@@ -34,9 +34,10 @@ fault-first and says which bits clash.
 
 Other statusword bits a diagnosis needs:
 
-- **Bit 4, voltage enabled.** High voltage is present at the power stage. If it is 0 in Switch on
-  disabled or Ready to switch on, Switch on (T3) cannot work. Check mains, the DC link and the
-  main contactor.
+- **Bit 4, voltage enabled.** In the profile's meaning, high voltage is present at the power
+  stage. If it is 0 in Switch on disabled or Ready to switch on, Switch on (T3) cannot work.
+  Check mains, the DC link and the main contactor. maxon EPOS4 uses the bit for "power stage on"
+  instead, so there it is 0 until T3 by design (`vendors/maxon.md`).
 - **Bit 7, warning.** The drive keeps running. The cause is usually in the drive's own
   diagnostic objects.
 - **Bit 9, remote.** 0 can mean a commissioning tool or keypad has control and the controlword
@@ -81,7 +82,7 @@ mode-specific, and bits 11–15 are manufacturer-specific. Write bit 10 as 0.
 | 6 | Switched on → Ready to switch on | 0x0006 | power stage off |
 | 7 | Ready to switch on → Switch on disabled | 0x0000 | — |
 | 8 | Operation enabled → Ready to switch on | 0x0006 | stops as 0x605B says, power stage off |
-| 9 | Operation enabled → Switch on disabled | 0x0000 | power stage off at once: coasts, or falls onto its brake |
+| 9 | Operation enabled → Switch on disabled | 0x0000 | power stage off at once: coasts, or falls onto its brake (maxon EPOS4 first stops as 0x605B says) |
 | 10 | Switched on → Switch on disabled | 0x0000 | power stage off |
 | 11 | Operation enabled → Quick stop active | 0x0002 | stops as 0x605A says |
 | 12 | Quick stop active → Switch on disabled | 0x0000, or the drive itself | power stage off |
@@ -104,8 +105,9 @@ list (or ask ethercat-esi for the allowed values) before writing one.
 | 0x605D halt option code | controlword bit 8 | 1 slow-down ramp · 2 quick-stop ramp · 3 current limit · 4 voltage limit; the drive stays in Operation enabled |
 | 0x605E fault reaction option code | T13 | 0 power stage off · 1 slow-down ramp · 2 quick-stop ramp · 3 current limit · 4 voltage limit |
 
-The slow-down ramp is the profile deceleration (0x6084) and the quick-stop ramp is the
-quick-stop deceleration (0x6085).
+The slow-down ramp is the deceleration of the active mode: 0x6084 in PP and PV, and 0x6049 in
+VL. Drives differ in what they use in the cyclic modes. The quick-stop ramp is 0x6085 (0x604A in
+VL).
 
 The vendor subsets differ enough to break a port: maxon EPOS4 offers only 6, Synapticon 0, 2
 and 6, Nanotec's CL3-E 0–2, and Beckhoff's EL72x1 in DS402 has no 0x605A at all. Sources are on
