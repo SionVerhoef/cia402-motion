@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `SKILL.md` body: the rules, the tool, a routing table and the hand-offs to the sibling skills.
+  `decode` is down to one line. Without the skill, current models decode correctly; they go
+  wrong on ordering in code and on vendor facts.
+- `references/`: state machine, modes, homing, objects, PDO mapping, units, touch probe,
+  errors, CANopen bring-up, commissioning triage, safety boundary, and `vendors/` (deviations
+  only, each with vendor, source and date).
+- `scripts/cia402.py pdo`: checks a PDO mapping against the modes of an axis, per axis on a
+  multi-axis device. Exit 1 on an error.
+- `scripts/cia402.py`: mode 11 (cyclic synchronous torque with commutation angle) and its
+  0x6502 bit 10, from Beckhoff and TI documentation. The 0x000F note now says it is the
+  profile's Switch on + Enable operation command.
+
 - `evals/`: a runner for isolated headless eval cells, the 14-task scouting set, and the
   no-skill baseline on Opus 5.5, Haiku 5.5 and Haiku 4.5 (`evals/results-scouting.md`).
 - `scripts/cia402.py decode`: statusword, controlword, 0x6502, 0x6060/0x6061 and 0x6098.

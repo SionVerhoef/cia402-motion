@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode CiA 402 drive words and plan state-machine transitions.
+"""Decode CiA 402 drive words, plan state-machine transitions and check PDO mappings.
 
     cia402.py decode sw 0x1637 --mode pp      statusword (0x6041), mode-aware
     cia402.py decode cw 0x001F --mode pp      controlword (0x6040)
@@ -9,9 +9,12 @@
     cia402.py plan fault                      Fault -> Operation enabled
     cia402.py plan 0x0250 switched_on         from a statusword to a state
     cia402.py plan sod --mode csp             with the mode switch and the CSP set-up
+    cia402.py pdo --mode csp --rx 6040 607A --tx 6041 6064
+                                              check a PDO mapping against the modes
 
 --json prints the same result for a program. A value is decimal, 0x or 16# hex, or
-0b or 2# binary; underscores are ignored, so 2#0001_0110 works.
+0b or 2# binary; underscores are ignored, so 2#0001_0110 works. PDO entries are object
+indices and always hex.
 
 Standard library only, so it runs on an engineering PC with nothing but Python 3.8.
 Bit numbers, object indices and code values are facts of the profile; every label
@@ -179,7 +182,9 @@ MODE_SW_BITS = (10, 12, 13)
 MODE_CW_BITS = (4, 5, 6, 9)
 
 # Modes of operation (0x6060 / 0x6061). Bit (code - 1) of 0x6502 says a drive
-# supports the mode. Negative codes are manufacturer-specific.
+# supports the mode. Negative codes are manufacturer-specific. Mode 11 is taken from
+# Beckhoff's EL72x1 in DS402 and TI's Industrial Communications SDK; python-canopen stops
+# at 10.
 MODES = {
     1: ('pp', 'Profile position'),
     2: ('vl', 'Velocity'),
@@ -190,12 +195,15 @@ MODES = {
     8: ('csp', 'Cyclic synchronous position'),
     9: ('csv', 'Cyclic synchronous velocity'),
     10: ('cst', 'Cyclic synchronous torque'),
+    11: ('cstca', 'Cyclic synchronous torque with commutation angle'),
 }
+CYCLIC = ('csp', 'csv', 'cst', 'cstca')
 MODE_CODE = {key: code for code, (key, _) in MODES.items()}
 
 # What the mode-specific bits mean in each mode. A bit a mode does not list is unused
 # there (statusword) or reserved and to be written 0 (controlword). VL is left out:
-# this tool does not decode its ramp-function bits.
+# this tool does not decode its ramp-function bits. CSTCA is left out: no source we
+# read gives its bits.
 MODE_BITS = {
     'pp': {
         'sw': {10: 'target reached', 12: 'set-point acknowledge', 13: 'following error'},
@@ -238,6 +246,7 @@ SETPOINT_BEFORE_ENABLE = {
     'pv': 'Set the target velocity (0x60FF) to 0.',
     'cst': 'Set the target torque (0x6071) to 0.',
     'pt': 'Set the target torque (0x6071) to 0.',
+    'cstca': 'Set the target torque (0x6071) to 0.',
     'pp': 'Keep controlword bit 4 low; a move starts later on its rising edge.',
     'hm': 'Select the homing method in 0x6098 (speeds 0x6099, acceleration 0x609A).',
     'ip': 'Keep controlword bit 4 (enable interpolation) low until set-points are ready.',
@@ -432,8 +441,9 @@ def decode_statusword(sw, mode=None):
         notes.append('Read 0x603F for the error code.')
     if 4 not in is_set and current in ('switch_on_disabled', 'ready_to_switch_on'):
         notes.append('Voltage enabled (bit 4) is 0: no high voltage at the power stage, '
-                     'and Switch on (T3) needs it. Check the mains or DC-link supply '
-                     '(a drive that never sets bit 4 can ignore this).')
+                     'and Switch on (T3) needs it. Check the mains or DC-link supply. '
+                     '(maxon EPOS4 sets bit 4 only once the power stage is on, so there '
+                     'this is normal.)')
     if 7 in is_set:
         notes.append('Warning (bit 7): the drive keeps running; the cause is in its own '
                      'diagnostic objects.')
@@ -491,7 +501,7 @@ def controlword_command(cw):
         return 'Shutdown', [2, 6, 8]
     if not cw & 0x08:
         return 'Switch on / Disable operation', [3, 5]
-    return 'Enable operation', [4, 16]
+    return 'Enable operation', [3, 4, 16]  # in Ready to switch on: T3, then T4
 
 
 def decode_controlword(cw, mode=None):
@@ -511,7 +521,8 @@ def decode_controlword(cw, mode=None):
                          f'does with them is not defined.')
     if command == 'Enable operation':
         notes.append('Sent in Ready to switch on, 0x000F means Switch on + Enable operation '
-                     '(T3, then T4), as maxon EPOS4 documents.')
+                     '(T3, then T4): a command of the profile, documented by maxon and '
+                     'Synapticon. Stepping through 0x0007 first works on every drive.')
     if 8 in is_set:
         notes.append('Halt (bit 8): the drive decelerates as 0x605D says and stays in '
                      'Operation enabled.')
@@ -542,7 +553,7 @@ def decode_supported_modes(value):
     modes = [{'code': code, 'key': key, 'name': name}
              for code, (key, name) in MODES.items() if value & (1 << (code - 1))]
     notes = []
-    reserved = [b for b in [4] + list(range(10, 16)) if value & (1 << b)]
+    reserved = [b for b in [4] + list(range(11, 16)) if value & (1 << b)]
     if reserved:
         notes.append(f'{_bits(reserved).capitalize()} set: not in this tool\'s table '
                      f'(reserved, or a mode from a later edition of the profile).')
@@ -567,6 +578,9 @@ def decode_mode(code):
     else:
         key, name, kind = None, 'not in this tool\'s table', 'unknown'
     notes = []
+    if code == 11:
+        notes.append('Few drives offer mode 11. Beckhoff documents it for the EL72x1 in '
+                     'DS402, and TI\'s Industrial Communications SDK lists it.')
     if kind == 'manufacturer':
         notes.append('Negative modes are manufacturer-specific: the same number can mean '
                      'different things on different drives. Look it up in this drive\'s '
@@ -750,13 +764,298 @@ def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
     if mode and target == 'operation_enabled':
         if mode[0] in AFTER_ENABLE:
             notes.append(AFTER_ENABLE[mode[0]])
-        if mode[0] in ('csp', 'csv', 'cst'):
+        if mode[0] in CYCLIC:
             notes.append(CYCLIC_NOTE)
     if any(s['kind'] != 'prepare' for s in steps):
         notes.append(WAIT_NOTE)
     return {'from': start, 'from_name': STATES[start]['name'], 'to': target,
             'to_name': STATES[target]['name'], 'mode': _mode_out(mode),
             'steps': steps, 'notes': notes}
+
+
+# --- PDO check ----------------------------------------------------------------------
+
+# Profile objects that commonly travel in a PDO: (name, direction, bits, subindex).
+# 'rx' is written by the master (RxPDO), 'tx' is read by it (TxPDO).
+OBJECTS = {
+    0x603F: ('Error code', 'tx', 16, 0),
+    0x6040: ('Controlword', 'rx', 16, 0),
+    0x6041: ('Statusword', 'tx', 16, 0),
+    0x6042: ('vl target velocity', 'rx', 16, 0),
+    0x6043: ('vl velocity demand', 'tx', 16, 0),
+    0x6044: ('vl velocity actual value', 'tx', 16, 0),
+    0x6060: ('Modes of operation', 'rx', 8, 0),
+    0x6061: ('Modes of operation display', 'tx', 8, 0),
+    0x6062: ('Position demand value', 'tx', 32, 0),
+    0x6063: ('Position actual internal value', 'tx', 32, 0),
+    0x6064: ('Position actual value', 'tx', 32, 0),
+    0x606B: ('Velocity demand value', 'tx', 32, 0),
+    0x606C: ('Velocity actual value', 'tx', 32, 0),
+    0x6071: ('Target torque', 'rx', 16, 0),
+    0x6072: ('Max torque', 'rx', 16, 0),
+    0x6074: ('Torque demand', 'tx', 16, 0),
+    0x6077: ('Torque actual value', 'tx', 16, 0),
+    0x6078: ('Current actual value', 'tx', 16, 0),
+    0x607A: ('Target position', 'rx', 32, 0),
+    0x607F: ('Max profile velocity', 'rx', 32, 0),
+    0x6081: ('Profile velocity', 'rx', 32, 0),
+    0x6083: ('Profile acceleration', 'rx', 32, 0),
+    0x6084: ('Profile deceleration', 'rx', 32, 0),
+    0x6087: ('Torque slope', 'rx', 32, 0),
+    0x6098: ('Homing method', 'rx', 8, 0),
+    0x60B0: ('Position offset', 'rx', 32, 0),
+    0x60B1: ('Velocity offset', 'rx', 32, 0),
+    0x60B2: ('Torque offset', 'rx', 16, 0),
+    0x60B8: ('Touch probe function', 'rx', 16, 0),
+    0x60B9: ('Touch probe status', 'tx', 16, 0),
+    0x60BA: ('Touch probe 1 positive edge', 'tx', 32, 0),
+    0x60BB: ('Touch probe 1 negative edge', 'tx', 32, 0),
+    0x60BC: ('Touch probe 2 positive edge', 'tx', 32, 0),
+    0x60BD: ('Touch probe 2 negative edge', 'tx', 32, 0),
+    0x60C1: ('Interpolation data record', 'rx', 32, 1),
+    0x60E0: ('Positive torque limit value', 'rx', 16, 0),
+    0x60E1: ('Negative torque limit value', 'rx', 16, 0),
+    0x60EA: ('Commutation angle', 'rx', 16, 0),
+    0x60F4: ('Following error actual value', 'tx', 32, 0),
+    0x60FD: ('Digital inputs', 'tx', 32, 0),
+    0x60FE: ('Digital outputs', 'rx', 32, 1),
+    0x60FF: ('Target velocity', 'rx', 32, 0),
+}
+
+AXIS_OFFSET = 0x800  # a multi-axis device repeats 0x6000-0x67FF once per axis
+LAST_AXIS = 8
+
+# What each mode needs in the cyclic exchange: (pdo, index, level, why). A level of
+# 'error' means the mode cannot be run from the master without it. The profile modes
+# can take their set-point by SDO instead, so there a missing one is a warning.
+LOOP_IN_MASTER = 'a position loop closed in the master needs it every cycle'
+BY_SDO = 'without it, every new set-point needs an SDO write'
+PDO_RULES = {
+    'pp': [('rx', 0x607A, 'warning', f'it carries the target of each move; {BY_SDO}'),
+           ('tx', 0x6064, 'warning', 'it says where the axis is, which absolute moves are '
+                                     'planned from')],
+    'vl': [('rx', 0x6042, 'warning', f'it carries the set-point; {BY_SDO}')],
+    'pv': [('rx', 0x60FF, 'warning', f'it carries the set-point; {BY_SDO}'),
+           ('tx', 0x606C, 'warning', 'it shows the speed reached')],
+    'pt': [('rx', 0x6071, 'warning', f'it carries the set-point; {BY_SDO}')],
+    'hm': [('tx', 0x6064, 'warning', 'it gives the homed position, which the next mode '
+                                     'starts from')],
+    'ip': [('rx', 0x60C1, 'error', 'it carries the set-points'),
+           ('tx', 0x6064, 'warning', 'the interpolation points start from it')],
+    'csp': [('rx', 0x607A, 'error', 'it carries the set-point every cycle'),
+            ('tx', 0x6064, 'error', 'the trajectory starts from it, and target = actual '
+                                    'before enabling needs it')],
+    'csv': [('rx', 0x60FF, 'error', 'it carries the set-point every cycle'),
+            ('tx', 0x6064, 'warning', LOOP_IN_MASTER)],
+    'cst': [('rx', 0x6071, 'error', 'it carries the set-point every cycle'),
+            ('tx', 0x6064, 'warning', LOOP_IN_MASTER)],
+    # CSTCA as Beckhoff documents it for the EL72x1: torque plus the electrical angle.
+    'cstca': [('rx', 0x6071, 'error', 'it carries the torque set-point every cycle'),
+              ('rx', 0x60EA, 'error', 'it carries the commutation angle every cycle')],
+}
+LEVELS = ('error', 'warning', 'note')
+MDP742 = (0x7010, 0x6010)  # Beckhoff's drive outputs and inputs, controlword at :01
+SETPOINT_OF = {0x607A: ('pp', 'csp'), 0x60FF: ('pv', 'csv'),
+               0x6071: ('pt', 'cst', 'cstca'), 0x60C1: ('ip',), 0x6042: ('vl',)}
+
+
+def _hex_digits(part):
+    """'607A' from 607A, 0x607A, 16#607A or 607Ah."""
+    for prefix in ('0x', '16#'):
+        if part.startswith(prefix):
+            return part[len(prefix):]
+    return part[:-1] if part.endswith('h') else part
+
+
+def parse_entry(text):
+    """{'index', 'sub', 'bits'} from 6040, 0x607A:00, 6040h or a 32-bit mapping entry
+    such as 0x60400010 (index, subindex, bit length). Always hexadecimal."""
+    index, colon, sub = text.strip().replace('_', '').lower().partition(':')
+    index, sub = _hex_digits(index), _hex_digits(sub)
+    if not index or (colon and not sub) or any(c not in '0123456789abcdef'
+                                               for c in index + sub):
+        raise ValueError(f'not a PDO entry: {text!r}. Write the index in hex, e.g. 6040, '
+                         f'0x607A:00 or the mapping value 0x60400010')
+    if sub:
+        if len(index) > 4 or int(sub, 16) > 0xFF:
+            raise ValueError(f'not a PDO entry: {text!r}: index is 16 bits, subindex 8')
+        return {'index': int(index, 16), 'sub': int(sub, 16), 'bits': None}
+    if len(index) == 8:
+        value = int(index, 16)
+        return {'index': value >> 16, 'sub': (value >> 8) & 0xFF, 'bits': value & 0xFF}
+    if len(index) > 4:
+        raise ValueError(f'not a PDO entry: {text!r}: give a 4-digit index or the '
+                         f'8-digit mapping value')
+    return {'index': int(index, 16), 'sub': None, 'bits': None}
+
+
+def _split_entries(texts):
+    return [parse_entry(t) for text in texts for t in text.split(',') if t.strip()]
+
+
+def _profile_object(index):
+    """(axis, base index) for a profile object of any axis, else (None, None)."""
+    if not 0x6000 <= index < 0x6000 + LAST_AXIS * AXIS_OFFSET:
+        return None, None
+    axis, offset = divmod(index - 0x6000, AXIS_OFFSET)
+    base = 0x6000 + offset
+    return (axis + 1, base) if base in OBJECTS else (None, None)
+
+
+def _label(index, sub=None):
+    name = f'0x{index:04X}'
+    if sub is not None:
+        name += f':{sub:02X}'
+    axis, base = _profile_object(index)
+    return f'{name} {OBJECTS[base][0]}' if base else name
+
+
+def _entry_findings(pdo, entries, mapped, add):
+    """Check each entry on its own; record every profile object in mapped."""
+    seen = set()
+    for e in entries:
+        index, sub, bits = e['index'], e['sub'], e['bits']
+        if index < 0x0008:
+            continue  # padding: a gap (0x0000) or a CANopen dummy entry
+        axis, base = _profile_object(index)
+        # 6040 and 0x60400010 are the same entry: compare at the subindex actually used.
+        key = (index, sub if sub is not None else OBJECTS[base][3] if base else 0)
+        if key in seen:
+            add('warning', pdo, index, f'{_label(index)} is mapped twice.', axis)
+        seen.add(key)
+        if index in MDP742:
+            continue  # one note in check_pdo() covers these
+        if base is None:
+            if 0x2000 <= index < 0x6000:
+                what = 'is manufacturer-specific: its meaning is in the drive manual'
+            elif 0x6000 <= index < 0xA000:
+                what = 'is not in this tool\'s object table: check the index'
+            else:
+                what = 'is not a drive-profile object'
+            add('note', pdo, index, f'0x{index:04X} {what}.')
+            continue
+        _, direction, size, want_sub = OBJECTS[base]
+        mapped.setdefault((axis, base), set()).add(pdo)
+        if direction != pdo:
+            where, role = (('RxPDO', 'the master writes it') if direction == 'rx'
+                           else ('TxPDO', 'the drive reports it'))
+            add('error', pdo, index, f'{_label(index)} belongs in the {where}: {role}.', axis)
+        if sub is not None and sub != want_sub:
+            add('error', pdo, index, f'{_label(index, sub)}: this object is mapped from '
+                                     f'subindex {want_sub}.', axis)
+        if bits is not None and bits != size:
+            add('error', pdo, index, f'{_label(index)} is {size} bits, mapped as {bits}.',
+                axis)
+
+
+def _axis_findings(axis, mapped, modes, add):
+    """Check that one axis has what its modes need."""
+    def at(base):
+        return base + (axis - 1) * AXIS_OFFSET
+
+    def has(base, pdo):
+        return pdo in mapped.get((axis, base), ())
+
+    def present(base):
+        # Mapped in either PDO: one in the wrong PDO was reported already.
+        return (axis, base) in mapped
+
+    keys = [m[0] for m in modes if m[0]]
+    rules = {('rx', 0x6040): ['error', ['every command to the drive goes through it'], []],
+             ('tx', 0x6041): ['error', ['without it the master cannot see the state'], []]}
+    if len(modes) > 1:
+        # Switching by SDO and polling 0x6061 works too, only slower: a warning.
+        rules[('rx', 0x6060)] = ['warning', ['it switches between the modes; without it, '
+                                             'each switch needs an SDO write'], []]
+        rules[('tx', 0x6061)] = ['warning', ['it confirms a mode switch before the new mode '
+                                             'is used; without it, poll 0x6061 by SDO'], []]
+    for key in keys:
+        for pdo, base, level, why in PDO_RULES[key]:
+            rule = rules.setdefault((pdo, base), [level, [], []])
+            rule[0] = min(rule[0], level, key=LEVELS.index)
+            rule[1].append(why)
+            rule[2].append(key.upper())
+    for (pdo, base), (level, whys, needed_by) in rules.items():
+        if present(base):
+            continue
+        where = 'RxPDO' if pdo == 'rx' else 'TxPDO'
+        by = f' ({"/".join(needed_by)})' if needed_by else ''
+        add(level, pdo, at(base), f'{_label(at(base))} is not in the {where}: '
+                                  f'{"; ".join(whys)}{by}.', axis)
+
+    if len(modes) == 1 and has(0x6060, 'rx') and not present(0x6061):
+        add('warning', 'tx', at(0x6061), f'{_label(at(0x6061))} is not in the TxPDO: the '
+                                         f'mode written to 0x{at(0x6060):04X} is never '
+                                         f'confirmed.', axis)
+    elif len(modes) == 1 and not present(0x6060) and not present(0x6061):
+        add('note', 'rx', at(0x6060), f'0x{at(0x6060):04X} is not mapped: write it by SDO at '
+                                      f'start-up and read back 0x{at(0x6061):04X} before '
+                                      f'enabling. A drive can power up in another mode.',
+            axis)
+    if not present(0x603F):
+        add('note', 'tx', at(0x603F), f'{_label(at(0x603F))} is not mapped: after a fault, '
+                                      f'read it by SDO.', axis)
+    if has(0x60B8, 'rx') and not present(0x60B9):
+        add('warning', 'tx', at(0x60B9), f'{_label(at(0x60B9))} is not in the TxPDO: a latch '
+                                         f'is armed but never seen.', axis)
+    if has(0x60B9, 'tx') and not any(present(b) for b in (0x60BA, 0x60BB, 0x60BC, 0x60BD)):
+        add('warning', 'tx', at(0x60BA), f'Touch probe status is mapped, but no latched '
+                                         f'position (0x{at(0x60BA):04X}-0x{at(0x60BD):04X}).',
+            axis)
+    for base, users in SETPOINT_OF.items():
+        if has(base, 'rx') and keys and not set(users) & set(keys):
+            add('note', 'rx', at(base), f'{_label(at(base))} is the set-point of '
+                                        f'{"/".join(u.upper() for u in users)}, not of '
+                                        f'{"/".join(k.upper() for k in keys)}.', axis)
+
+
+def check_pdo(rx, tx, modes):
+    """Lint a PDO mapping. rx and tx are lists of parse_entry() results, modes a list
+    of resolve_mode() results. Each axis of a multi-axis device is checked apart."""
+    findings = []
+
+    def add(level, pdo, index, message, axis=None):
+        findings.append({'level': level, 'pdo': pdo, 'object': f'0x{index:04X}',
+                         'axis': axis, 'message': message})
+
+    modes = list({m[1]: m for m in modes}.values())  # csp,8 is one mode, not a switch
+    mapped = {}  # (axis, base index) -> the PDOs it is in
+    _entry_findings('rx', rx, mapped, add)
+    _entry_findings('tx', tx, mapped, add)
+    for m in modes:
+        if not m[0]:
+            add('note', 'rx', 0x6060, f'Mode {m[1]} is manufacturer-specific: this tool '
+                                      f'cannot say which objects it needs.')
+    mdp742 = any(e['index'] in MDP742 for e in rx + tx)
+    if mdp742:
+        rest = (', so nothing else was checked' if not mapped else '')
+        add('note', 'rx', 0x7010, f'0x7010 and 0x6010 are Beckhoff\'s MDP742 drive profile '
+                                  f'(EL72x1 and others; controlword 0x7010:01, statusword '
+                                  f'0x6010:01), not CiA 402{rest}: see '
+                                  f'references/vendors/beckhoff.md.')
+    axes = sorted({axis for axis, _ in mapped}) or ([] if mdp742 else [1])
+    for axis in axes:
+        if axis > 1 and not any((axis, b) in mapped for b in (0x6040, 0x6041)):
+            # A monitored value of another axis, or a typo: not an axis to command.
+            shown = ', '.join(f'0x{base + (axis - 1) * AXIS_OFFSET:04X}'
+                              for a, base in sorted(mapped) if a == axis)
+            add('warning', 'rx', 0x6040 + (axis - 1) * AXIS_OFFSET,
+                f'Axis {axis} appears only through {shown}, with no controlword or '
+                f'statusword: a typo, or an axis that is only monitored? Its other '
+                f'objects were not checked.', axis)
+            continue
+        _axis_findings(axis, mapped, modes, add)
+    findings.sort(key=lambda f: (LEVELS.index(f['level']), f['axis'] or 0))
+
+    def listing(entries):
+        names = [_profile_object(e['index'])[1] for e in entries]
+        return [{'index': f'0x{e["index"]:04X}', 'sub': e['sub'], 'bits': e['bits'],
+                 'name': OBJECTS[base][0] if base else None}
+                for e, base in zip(entries, names)]
+
+    return {'modes': [_mode_out(m) for m in modes], 'rx': listing(rx), 'tx': listing(tx),
+            'axes': axes, 'findings': findings,
+            'counts': {level: sum(f['level'] == level for f in findings) for level in LEVELS}}
 
 
 # --- Output -------------------------------------------------------------------------
@@ -811,7 +1110,7 @@ def render_controlword(r):
 def render_supported_modes(r):
     print(f'supported modes {r["hex"]} ({r["value"]})')
     for m in r['modes']:
-        print(f'  {m["code"]:>2}  {m["key"].upper():<4} {m["name"]}')
+        print(f'  {m["code"]:>2}  {m["key"].upper():<5} {m["name"]}')
     _print_notes(r['notes'])
 
 
@@ -839,6 +1138,19 @@ def render_plan(r):
         if s['note']:
             print(f'       {s["note"]}')
     _print_notes(r['notes'])
+
+
+def render_pdo(r):
+    modes = ', '.join(m['key'].upper() if m['key'] else str(m['code']) for m in r['modes'])
+    axes = ', '.join(str(a) for a in r['axes']) or 'none'
+    print(f'pdo check, mode {modes}, axis {axes}')
+    for pdo in ('rx', 'tx'):
+        entries = ', '.join(' '.join(filter(None, (e['index'], e['name']))) for e in r[pdo])
+        print(f'{pdo.capitalize()}PDO: {entries or "empty"}')
+    for f in r['findings']:
+        print(f'  {f["level"]:<8} {f["message"]}')
+    c = r['counts']
+    print(f'result: {c["error"]} error(s), {c["warning"]} warning(s), {c["note"]} note(s)')
 
 
 # --- Command line -------------------------------------------------------------------
@@ -887,9 +1199,19 @@ def run_plan(start_text, target_text, mode_text, quick_stop_stays):
     return result, render_plan
 
 
+def run_pdo(mode_text, rx_texts, tx_texts):
+    modes = [resolve_mode(t) for t in mode_text.split(',') if t.strip()]
+    if not modes:
+        raise ValueError('give the mode(s) the axis runs in, e.g. --mode csp or --mode hm,csp')
+    if any(m[1] == 0 for m in modes):
+        raise ValueError('mode 0 is no mode: give the mode(s) the axis runs in')
+    return check_pdo(_split_entries(rx_texts), _split_entries(tx_texts), modes), render_pdo
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description='Decode CiA 402 drive words and plan state-machine transitions.')
+        description='Decode CiA 402 drive words, plan state-machine transitions and check '
+                    'PDO mappings.')
     sub = parser.add_subparsers(dest='verb', required=True)
 
     p = sub.add_parser('decode', help='decode a statusword, controlword, 0x6502, 0x6060 '
@@ -897,7 +1219,8 @@ def main(argv=None):
     p.add_argument('what', help='sw | cw | modes | mode | method (or the object index)')
     p.add_argument('value', help='decimal, 0x / 16# hex, or 0b / 2# binary')
     p.add_argument('--mode', help='mode of operation for the mode-specific bits: '
-                                  'pp, pv, pt, hm, ip, csp, csv, cst or a 0x6060 code')
+                                  'pp, vl, pv, pt, hm, ip, csp, csv, cst, cstca or a 0x6060 '
+                                  'code')
     p.add_argument('--json', action='store_true', help='machine-readable output')
 
     p = sub.add_parser('plan', help='controlword sequence from one state to another')
@@ -910,20 +1233,35 @@ def main(argv=None):
                    help='0x605A keeps the drive in Quick stop active, so T16 is allowed')
     p.add_argument('--json', action='store_true', help='machine-readable output')
 
+    p = sub.add_parser('pdo', help='check a PDO mapping against the modes it must run')
+    p.add_argument('--mode', required=True,
+                   help='mode or modes the axis runs in, comma-separated: e.g. csp, hm,csp. '
+                        'A list that starts with a negative code needs the = form: '
+                        '--mode=-3,csp')
+    p.add_argument('--rx', nargs='+', action='extend', default=[], metavar='ENTRY',
+                   help='RxPDO entries (master to drive), in hex: 6040, 0x607A:00 or a '
+                        'mapping value such as 0x60400010')
+    p.add_argument('--tx', nargs='+', action='extend', default=[], metavar='ENTRY',
+                   help='TxPDO entries (drive to master), in the same form')
+    p.add_argument('--json', action='store_true', help='machine-readable output')
+
     args = parser.parse_args(argv)
     try:
         if args.verb == 'decode':
             result, render = run_decode(args.what, args.value, args.mode)
-        else:
+        elif args.verb == 'plan':
             result, render = run_plan(args.start, args.target, args.mode,
                                       args.quick_stop_stays)
+        else:
+            result, render = run_pdo(args.mode, args.rx, args.tx)
     except ValueError as e:
         parser.error(str(e))
     if args.json:
         print(json.dumps(result, indent=2))
     else:
         render(result)
-    return 0
+    # A PDO check with an error fails, so it can gate a build.
+    return 1 if args.verb == 'pdo' and result['counts']['error'] else 0
 
 
 if __name__ == '__main__':

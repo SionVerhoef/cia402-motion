@@ -19,6 +19,15 @@ drive won't reach Operation Enabled.
 tested against an independent model of the state machine and against python-canopen; none of
 it has been run against a real drive.
 
+## What is in it
+
+- `SKILL.md`: the rules an agent follows, and where to read next.
+- `references/`: the state machine, modes, homing, objects, PDO mapping, units, touch probe,
+  errors, CANopen bring-up, a commissioning triage tree, the safety boundary, and one page per
+  drive vendor with the deviations from the profile that were found in that vendor's own
+  documents. Each claim carries its source and the date it was read.
+- `scripts/cia402.py`: the tool below.
+
 ## The tool
 
 `scripts/cia402.py` needs nothing but Python 3.8 or newer (`py -3` on Windows):
@@ -28,6 +37,7 @@ python3 scripts/cia402.py decode sw 0x0068          # non-standard: treated as F
 python3 scripts/cia402.py decode sw 0x1637 --mode hm
 python3 scripts/cia402.py decode cw 0x001F --mode pp
 python3 scripts/cia402.py plan fault --mode csp     # controlword sequence, with the CSP set-up
+python3 scripts/cia402.py pdo --mode hm,csp --rx 6040 6060 607A --tx 6041 6061 6064
 ```
 
 - **`decode`** reads a statusword (0x6041), controlword (0x6040), supported-modes bitmap
@@ -40,6 +50,11 @@ python3 scripts/cia402.py plan fault --mode csp     # controlword sequence, with
   (target = actual in CSP) before the mode switch, which is confirmed on 0x6061; a quick stop
   left to finish rather than cut short; never Disable voltage straight from Operation enabled
   (T9), and never a detour through Operation enabled on the way to another state.
+- **`pdo`** checks a PDO mapping against the modes an axis runs in. It flags a missing
+  controlword, statusword or set-point, 0x6060 without 0x6061, objects in the wrong direction
+  or with the wrong length, and touch probes armed but never read. Each axis of a multi-axis
+  device is checked on its own. Entries can be pasted as the 32-bit values read from a mapping
+  object. It exits 1 on an error, so it can gate a build.
 
 Add `--json` for machine-readable output.
 
@@ -50,7 +65,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 `tests/test_canopen_oracle.py` cross-checks statusword states, homing phases, commanded
-transitions, mode codes and homing-method directions against
+transitions, mode codes (all but mode 11, which it lacks) and homing-method directions against
 [python-canopen](https://github.com/canopen-python/canopen) when it is installed; CI installs it.
 
 ## Licence
