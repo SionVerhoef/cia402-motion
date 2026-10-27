@@ -76,7 +76,8 @@ transitions, mode codes (all but mode 11, which it lacks) and homing-method dire
 `tests/test_templates.py` runs the function block's own Structured Text against a simulated
 drive, through `tests/st_subset.py`, a small interpreter for the subset the template is written
 in. Every scenario must keep the state-machine rules, and each rule broken on purpose must make
-one fail. CI also runs twincat-st's reviewer and file check on `templates/`.
+the scenario named for it fail. CI also runs twincat-st's reviewer and file check on
+`templates/`.
 
 ## Licence
 

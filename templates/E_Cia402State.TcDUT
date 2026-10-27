@@ -12,7 +12,7 @@ TYPE E_Cia402State :
     QuickStopActive     := 5,
     FaultReactionActive := 6,
     Fault               := 7,
-    Unknown             := 8    // matches no state, and the fault bit is 0
+    Unknown             := 8    // no state; or inputs that cannot be true
 ) INT;
 END_TYPE
 ]]></Declaration>

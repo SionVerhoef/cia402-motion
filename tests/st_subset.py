@@ -12,7 +12,12 @@ empty statement, and calls of TON and R_TRIG; expressions with NOT, unary minus,
 * / MOD + -, comparisons, AND, XOR, OR and ABS. As in IEC 61131-3, the logical
 operators take BOOL and the bit operators take integers, never a mix; an enum compares
 only with its own type; an integer wraps to its declared width when it is stored. TIME
-is whole milliseconds. Identifiers are case-sensitive here, which is stricter than ST.
+is whole milliseconds. Pragmas other than {attribute ...} are refused, since the code
+they guard may not be meant to run.
+
+What it does not check, so that a compiler still has to: identifiers are case-sensitive
+here (ST is not); integers of different types mix freely, so a narrowing or mixed-sign
+assignment passes; intermediate results have no width limit, only stored values wrap.
 """
 import re
 
@@ -157,6 +162,9 @@ def tokenize(text):
             raise StError(f'line {line}: cannot read {text[pos:pos + 20]!r}')
         kind, value = m.lastgroup, m.group()
         pos = m.end()
+        if kind == 'pragma' and not value[1:].lstrip().startswith('attribute'):
+            line = text.count('\n', 0, m.start()) + 1
+            raise StError(f'line {line}: pragma outside the subset: {value}')
         if kind in ('space', 'comment', 'pragma'):
             continue
         if kind == 'ident' and value.upper() in KEYWORDS:
@@ -258,6 +266,8 @@ class Parser:
         members = {}
         while not self.at('END_STRUCT'):
             for name, type_name, init in self.declaration():
+                if name in members:
+                    raise StError(f'member {name} declared twice')
                 members[name] = (type_name, init)
         self.take('END_STRUCT')
         self.skip_semicolon()
@@ -289,6 +299,8 @@ class Parser:
                 section = 'constant'
             while not self.at('END_VAR'):
                 for name, type_name, init in self.declaration():
+                    if name in fb['vars']:
+                        raise StError(f'{fb["name"]}.{name} declared twice')
                     fb['vars'][name] = (section, type_name, init)
             self.take('END_VAR')
         fb['body'] = self.statements()
@@ -599,10 +611,7 @@ class Instance:
         (milliseconds), and return the outputs."""
         self.now = now
         for name, value in inputs.items():
-            section = self.kinds.get(name)
-            if section == 'in_out':
-                self.vars[name] = self.program.coerce(self.types[name], value, name)
-            elif section == 'input':
+            if self.kinds.get(name) in ('input', 'in_out'):
                 self.vars[name] = self.program.coerce(self.types[name], value, name)
             else:
                 raise StError(f'{name} is not an input of {self.fb["name"]}')
@@ -636,6 +645,8 @@ class Instance:
                     self.run(node[3])
             elif kind == 'call':
                 self.call(node[1], node[2], node[3], evaluator)
+            elif kind != 'nop':
+                raise StError(f'statement {kind} outside the subset')
 
     @staticmethod
     def condition(value):

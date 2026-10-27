@@ -10,6 +10,7 @@ TYPE E_Cia402Step :
     SwitchOn        := 12,  // T3: 0x0007
     SetMode         := 13,  // 0x6060 written, 0x6061 awaited
     EnableOperation := 14,  // T4: 0x000F
+    AbortEnable     := 15,  // bEnable fell during T4: 0x0007, wait
     Homing          := 20,  // controlword bit 4 held high
     Running         := 30,  // bValid: the set-points are the caller's
     ResetLow        := 40,  // bit 7 low, so that the next write is an edge

@@ -7,7 +7,8 @@ what is tested is the template's text and not a Python copy of it. The simulated
 moves on test_cia402.model_drive, written from the controlword bit rules independently
 of cia402.TRANSITIONS, and checks the ordering rules of references/state-machine.md on
 every scan: it records a violation whenever the FB breaks one. Every scenario ends with
-no violations, and the transitions the drive took are compared with cia402.plan.
+no violations, the transitions the drive took are compared with cia402.plan, and the
+statusword can reach the FB late, as it does over a real bus.
 
 None of this is a real drive. It shows that the template keeps the rules against the
 profile's state machine; it cannot show what a particular drive does.
@@ -54,7 +55,7 @@ ENUM_OF = {
     'fault_reaction_active': 'FaultReactionActive', 'fault': 'Fault',
 }
 
-# Error codes, written out as the template's header lists them.
+# Error codes, written out as templates/README.md lists them.
 ERR = {'not_ready': 0x8101, 'shutdown': 0x8102, 'switch_on': 0x8103, 'enable': 0x8104,
        'mode': 0x8105, 'stop': 0x8106, 'homing_time': 0x8107, 'drive_fault': 0x8110,
        'reset_failed': 0x8111, 'quick_stop': 0x8112, 'left_state': 0x8113,
@@ -65,12 +66,18 @@ FAST = {'tStateTimeout': Time(200), 'tStopTimeout': Time(500), 'tHomingTimeout':
         'tResetPause': Time(100), 'tStandstill': Time(50), 'nResetAttempts': 3,
         'nStandstillWindow': 0}
 
+# Which set-point each mode follows.
+POSITION, VELOCITY, TORQUE = (1, 8), (3, 9), (4, 10, 11)
+FOLLOWED = {'target': (8,), 'velocity': (3, 9), 'torque': (4, 10, 11)}
+
+SOD, OE = 'switch_on_disabled', 'operation_enabled'
+
 
 class SimDrive:
     """A CiA 402 drive for the FB to talk to. step() takes the FB's outputs for one
-    cycle; the attributes are what the drive reports back for the next."""
+    cycle; statusword(), display and position are what the drive reports back."""
 
-    def __init__(self, state='switch_on_disabled', position=1000, modes=(1, 6, 8, 9, 10),
+    def __init__(self, state=SOD, position=1000, modes=(1, 3, 4, 6, 8, 9, 10),
                  quick_stop_stays=False, settle=1, mode_delay=2, qs_ramp=10,
                  homing_scans=8, home_position=0, homing_phase=0x0400, homing_fails=False,
                  boot_scans=5, fra_scans=3, jitter=0, refuse=()):
@@ -79,7 +86,7 @@ class SimDrive:
         self.qs_ramp, self.homing_scans, self.home_position = qs_ramp, homing_scans, home_position
         self.homing_phase, self.homing_fails = homing_phase, homing_fails
         self.boot_scans, self.fra_scans, self.jitter = boot_scans, fra_scans, jitter
-        self.refuse = refuse  # transitions this drive will not take, by target state
+        self.refuse = refuse  # states this drive will not move to when commanded
         self.display = 0
         self.fault_persists = False
         self.override_sw = None
@@ -94,14 +101,14 @@ class SimDrive:
         self.violations = []
         self.scan = 0
         self.jitter_sign = 1
-
-    # what the FB reads
+        self.lag = 0                # cycles late the FB sees the statusword (set by Rig)
+        self.states = []            # the state at the start of each cycle
 
     def statusword(self):
         if self.override_sw is not None:
             return self.override_sw
         sw = STATE_BITS[self.state] | VOLTAGE | REMOTE
-        if self.state == 'operation_enabled' and self.display == 6:
+        if self.state == OE and self.display == 6:
             sw |= self.homing_phase
         return sw
 
@@ -113,7 +120,7 @@ class SimDrive:
         self.timer = 0
 
     def external_quick_stop(self):
-        assert self.state == 'operation_enabled'
+        assert self.state == OE
         self._move('quick_stop_active', None)
         self.ramp_left = self.qs_ramp
 
@@ -130,17 +137,16 @@ class SimDrive:
             self.transitions.append((self.state, to, cw))
             self.state = to
 
-    def step(self, cw, mode_out, target, velocity, torque, enabled):
+    def step(self, cw, mode_out, target, velocity, torque, enabled, valid):
         self.scan += 1
-        before = self.state
-        # Against the position the FB read this cycle, before the drive moves on.
-        safe = (target == self.position and velocity == 0 and torque == 0
-                and cw & MODE_BITS == 0)
-        self._check_words(cw, before)
-        if self.last and mode_out != self.last['mode_out']:
-            if not self.last['safe']:
-                self.violation(f'0x6060 = {mode_out} written while the set-points of the '
-                               f'previous cycle were not safe')
+        before, position = self.state, self.position
+        self.states.append(before)
+        # The state the FB could have seen. A word that only a later statusword could
+        # have changed is judged against it; what the drive does is judged against
+        # `before`.
+        seen = self.states[max(0, len(self.states) - 1 - self.lag)]
+        self._check_words(cw, before, seen, enabled, valid)
+        self._check_setpoints(cw, mode_out, target, velocity, torque, before, valid)
 
         self.recent = (self.recent + [cw])[-self.settle:]
         self.prev_accepted = self.accepted
@@ -154,7 +160,7 @@ class SimDrive:
             new = 'fault'
         if new in self.refuse:
             new = self.state
-        if self.state == 'quick_stop_active' and new != 'quick_stop_active' and self.ramp_left:
+        if self.state == 'quick_stop_active' and new != self.state and self.ramp_left:
             self.violation(f'quick stop cut {self.ramp_left} scans before the motor stopped '
                            f'(controlword 0x{accepted:04X})')
         if new != self.state:
@@ -167,25 +173,57 @@ class SimDrive:
         if len(self.mode_queue) > self.mode_delay:
             wanted = self.mode_queue.pop(0)
             if wanted in self.modes and wanted != self.display:
-                self._display_changes(wanted, target, velocity, torque)
+                if self.state == OE:
+                    self._setpoint_safe(wanted, target, velocity, torque,
+                                        f'on the switch to {wanted}')
                 self.display = wanted
 
         self._homing(accepted)
         self._motion(target)
-        self.last = {'mode_out': mode_out, 'safe': safe}
+        self.last = {'cw': cw, 'mode_out': mode_out, 'target': target,
+                     'velocity': velocity, 'torque': torque, 'position': position}
 
-    def _check_words(self, cw, state):
+    def _check_words(self, cw, state, seen, enabled, valid):
         if cw & 0x80 and cw & 0x0F:
             self.violation(f'0x{cw:04X}: fault reset with the enable bits')
-        if cw & 0x80 and state != 'fault':
-            self.violation(f'0x{cw:04X}: bit 7 sent in {state}')
-        if state == 'operation_enabled' and not cw & 0x02:
+        if cw & 0x80 and seen != 'fault':
+            self.violation(f'0x{cw:04X}: bit 7 sent in {seen}')
+        if state == OE and not cw & 0x02:
             self.violation(f'0x{cw:04X}: Disable voltage from Operation enabled (T9)')
-        if state == 'quick_stop_active' and cw & 0x8F == 0x0F:
+        if seen == 'quick_stop_active' and cw & 0x8F == 0x0F:
             self.violation(f'0x{cw:04X}: Enable operation in Quick stop active (T16)')
+        if not enabled and cw & 0x8F == 0x0F:
+            self.violation(f'0x{cw:04X}: Enable operation sent while bEnable was FALSE')
+        if cw & 0x10 and self.display != 6 and not valid:
+            self.violation(f'0x{cw:04X}: bit 4 sent in mode {self.display} before bValid')
+
+    def _check_setpoints(self, cw, mode_out, target, velocity, torque, state, valid):
+        last = self.last
+        if last is None:
+            return
+        if mode_out != last['mode_out'] and not self._was_safe_for(mode_out, last):
+            self.violation(f'0x6060 = {mode_out} written before its set-point was safe')
+        if state == OE and not valid:
+            for key, value in (('target', target), ('velocity', velocity),
+                               ('torque', torque)):
+                if self.display in FOLLOWED[key] and value != last[key]:
+                    self.violation(f'{key} stepped from {last[key]} to {value} by the FB '
+                                   f'while the drive followed it')
+
+    @staticmethod
+    def _was_safe_for(mode, last):
+        if last['cw'] & MODE_BITS:
+            return False
+        if mode in POSITION:
+            return last['target'] == last['position']
+        if mode in VELOCITY:
+            return last['velocity'] == 0
+        if mode in TORQUE:
+            return last['torque'] == 0
+        return True
 
     def _entering(self, new, cw, target, velocity, torque, enabled):
-        if new != 'operation_enabled':
+        if new != OE:
             return
         if not enabled:
             self.violation('Operation enabled entered while bEnable was FALSE')
@@ -193,38 +231,33 @@ class SimDrive:
             self.violation(f'enabled with mode bits set: 0x{cw:04X}')
         self._setpoint_safe(self.display, target, velocity, torque, 'on enable')
 
-    def _display_changes(self, mode, target, velocity, torque):
-        if self.state == 'operation_enabled':
-            self._setpoint_safe(mode, target, velocity, torque, f'on the switch to {mode}')
-
     def _setpoint_safe(self, mode, target, velocity, torque, when):
         if mode == 8 and target != self.position:
             self.violation(f'CSP jump {when}: target {target}, actual {self.position}')
-        if mode in (3, 9) and velocity:
+        if mode in VELOCITY and velocity:
             self.violation(f'velocity {velocity} {when}')
-        if mode in (4, 10) and torque:
+        if mode in TORQUE and torque:
             self.violation(f'torque {torque} {when}')
 
     def _by_itself(self):
         self.timer += 1
         if self.state == 'not_ready_to_switch_on' and self.timer > self.boot_scans:
-            self._move('switch_on_disabled', None)
+            self._move(SOD, None)
         elif self.state == 'fault_reaction_active' and self.timer > self.fra_scans:
             self._move('fault', None)
         elif self.state == 'quick_stop_active' and self.ramp_left:
             self.position += self.ramp_left  # decelerating
             self.ramp_left -= 1
             if not self.ramp_left and not self.quick_stop_stays:
-                self._move('switch_on_disabled', None)
+                self._move(SOD, None)
         if self.state not in ('not_ready_to_switch_on', 'fault_reaction_active'):
             self.timer = 0
 
     def _homing(self, cw):
-        if self.state != 'operation_enabled' or self.display != 6:
+        if self.state != OE or self.display != 6:
             self.homing_left = None
             return
-        start = cw & 0x10 and not self.prev_accepted & 0x10
-        if start:
+        if cw & 0x10 and not self.prev_accepted & 0x10:
             self.homing_phase, self.homing_left = 0x0000, self.homing_scans
         if self.homing_left is None:
             return
@@ -241,34 +274,45 @@ class SimDrive:
             self.homing_left -= 1
 
     def _motion(self, target):
-        if self.state == 'operation_enabled' and self.display == 8:
-            self.position = target
+        if self.state == OE and self.display == 8:
+            # CSP with a following error: halfway to the target each cycle.
+            diff = target - self.position
+            self.position += diff if abs(diff) <= 2 else diff // 2
         elif self.jitter and not self.ramp_left and self.homing_left is None:
             self.position += self.jitter * self.jitter_sign
             self.jitter_sign = -self.jitter_sign
 
 
 class Rig:
-    """The FB, its drive and the inputs the test sets; scan() runs one cycle."""
+    """The FB, its drive and the inputs the test sets; scan() runs one cycle. The FB
+    reads what the drive reported `lag` cycles earlier."""
 
-    def __init__(self, drive, **config):
-        self.drive = drive
+    def __init__(self, drive, lag=0, copy_position=True, **config):
+        self.drive, self.lag, self.copy_position = drive, lag, copy_position
+        drive.lag = lag
         self.fb = PROGRAM.instance('FB_Cia402Axis')
         self.io = Struct(PROGRAM, 'ST_Cia402Drive')
         self.config = Struct(PROGRAM, 'ST_Cia402Config')
         for name, value in dict(FAST, **config).items():
             self.config[name] = value
         self.enable, self.mode, self.reset = False, 0, False
-        self.caller = None  # writes set-points while bValid, as an application would
+        self.caller = None  # writes set-points after the call while bValid
+        self.always = None  # writes before the call, valid or not
+        self.history = []
         self.now = 0
         self.words = []     # every controlword the FB wrote
         self.out = None
 
     def scan(self):
         d = self.drive
-        self.io['nStatusword'] = d.statusword()
-        self.io['nModesDisplay'] = d.display
-        self.io['nPositionActual'] = d.position
+        self.history.append((d.statusword(), d.display, d.position))
+        sw, display, position = self.history[max(0, len(self.history) - 1 - self.lag)]
+        self.io['nStatusword'] = sw
+        self.io['nModesDisplay'] = display
+        if self.copy_position:
+            self.io['nPositionActual'] = position
+        if self.always:
+            self.always(self)
         self.out = self.fb.scan(self.now, bEnable=self.enable, nMode=self.mode,
                                 bReset=self.reset, stConfig=self.config, stDrive=self.io)
         if self.out['bValid'] and self.caller:
@@ -276,7 +320,8 @@ class Rig:
         cw = self.io['nControlword']
         self.words.append(cw)
         d.step(cw, self.io['nModesOfOperation'], self.io['nTargetPosition'],
-               self.io['nTargetVelocity'], self.io['nTargetTorque'], self.enable)
+               self.io['nTargetVelocity'], self.io['nTargetTorque'], self.enable,
+               self.out['bValid'])
         self.now += CYCLE
         return self.out
 
@@ -292,19 +337,19 @@ class Rig:
                 return n + 1
         raise AssertionError(f'{what} not reached in {limit} scans: drive in '
                              f'{self.drive.state}, FB step {self.fb["eStep"]}, '
-                             f'outputs {self.out}')
+                             f'outputs {self.out}, violations {self.drive.violations}')
 
     def pulse_reset(self):
         self.reset = True
         self.scan()
         self.reset = False
 
-    def valid(self):
-        return self.until(lambda r: r.out['bValid'], what='bValid')
+    def valid(self, limit=400):
+        return self.until(lambda r: r.out['bValid'], limit, 'bValid')
 
     def at_rest(self):
-        return self.until(lambda r: r.drive.state == 'switch_on_disabled'
-                          and not r.out['bBusy'], what='rest in Switch on disabled')
+        return self.until(lambda r: r.drive.state == SOD and not r.out['bBusy'],
+                          what='rest in Switch on disabled')
 
     def error(self, code):
         n = self.until(lambda r: r.out['bError'], what=f'error 0x{code:04X}')
@@ -321,6 +366,15 @@ class Rig:
                 seq.append(w)
         return seq
 
+    def edges_of_bit_7(self, start=0):
+        w = self.words[start:]
+        return [i for i in range(1, len(w)) if w[i] & 0x80 and not w[i - 1] & 0x80]
+
+
+def ramp(step):
+    """A caller that moves the CSP target by `step` each cycle."""
+    return lambda r: r.io.__setitem__('nTargetPosition', r.io['nTargetPosition'] + step)
+
 
 def plan_transitions(start, target, mode=None, quick_stop_stays=False):
     """(from, to, controlword or None) for each state change in cia402.plan."""
@@ -336,19 +390,22 @@ def plan_transitions(start, target, mode=None, quick_stop_stays=False):
 
 
 class TemplateCase(unittest.TestCase):
+    """Every rig a test makes must end without a violation."""
+
+    def setUp(self):
+        self.rigs = []
 
     def tearDown(self):
-        rig = getattr(self, 'rig', None)
-        if rig is not None:
+        for rig in self.rigs:
             self.assertEqual(rig.drive.violations, [])
 
-    def make(self, **drive):
-        config = drive.pop('config', {})
-        self.rig = Rig(SimDrive(**drive), **config)
-        return self.rig
+    def make(self, lag=0, copy_position=True, config=None, **drive):
+        rig = Rig(SimDrive(**drive), lag, copy_position, **(config or {}))
+        self.rigs.append(rig)
+        return rig
 
-    def running(self, mode=8, **drive):
-        rig = self.make(**drive)
+    def running(self, mode=8, lag=0, config=None, **drive):
+        rig = self.make(lag, config=config, **drive)
         rig.enable, rig.mode = True, mode
         rig.valid()
         return rig
@@ -358,14 +415,15 @@ class Decode(TemplateCase):
 
     def test_every_statusword_pattern_against_the_decoder(self):
         # The states depend on bits 0-6 only; three settings of the high bits on top.
-        fb = PROGRAM.instance('FB_Cia402Axis')
-        io, config = Struct(PROGRAM, 'ST_Cia402Drive'), Struct(PROGRAM, 'ST_Cia402Config')
+        # A fresh FB for each word: after another state, Not ready counts as Unknown.
+        config = Struct(PROGRAM, 'ST_Cia402Config')
         for high in (0x0000, 0x0200, 0xFF80):
             for low in range(0x80):
                 sw = high | low
+                io = Struct(PROGRAM, 'ST_Cia402Drive')
                 io['nStatusword'] = sw
-                out = fb.scan(0, bEnable=False, nMode=0, bReset=False, stConfig=config,
-                              stDrive=io)
+                out = PROGRAM.instance('FB_Cia402Axis').scan(
+                    0, bEnable=False, nMode=0, bReset=False, stConfig=config, stDrive=io)
                 r = cia402.decode_statusword(sw)
                 key = r['state'] or (r['treat_as'] if r['treat_as'] in
                                      ('fault', 'fault_reaction_active') else None)
@@ -376,38 +434,32 @@ class Decode(TemplateCase):
 class Enabling(TemplateCase):
 
     def test_from_each_state_as_the_planner_says(self):
-        for start in ('switch_on_disabled', 'ready_to_switch_on', 'switched_on',
-                      'not_ready_to_switch_on', 'quick_stop_active'):
+        # Enabling starts from Switch on disabled: from above it, the way down first.
+        for start in (SOD, 'not_ready_to_switch_on', 'quick_stop_active',
+                      'ready_to_switch_on', 'switched_on', OE):
             with self.subTest(start=start):
-                rig = self.make(state=start)
+                rig = self.make(state=start, modes=(8,))
+                if start == OE:
+                    rig.drive.display = 8
                 rig.enable, rig.mode = True, 8
                 rig.valid()
-                self.assertEqual(rig.drive.transitions,
-                                 plan_transitions(start, 'operation_enabled', 'csp'))
-                self.assertEqual(rig.drive.violations, [])
+                expected = plan_transitions(start, OE, 'csp')
+                if start in ('ready_to_switch_on', 'switched_on', OE):
+                    expected = plan_transitions(start, SOD) + plan_transitions(SOD, OE, 'csp')
+                self.assertEqual(rig.drive.transitions, expected)
 
     def test_from_fault_after_a_reset(self):
         rig = self.make(state='fault')
         rig.enable, rig.mode = True, 8
-        self.assertTrue(rig.error(ERR['drive_fault']))
+        rig.error(ERR['drive_fault'])
         self.assertEqual(rig.words[-1], 0x0000)
         mark = len(rig.words)
         rig.pulse_reset()
         rig.valid()
-        self.assertEqual(rig.drive.transitions,
-                         plan_transitions('fault', 'operation_enabled', 'csp'))
+        self.assertEqual(rig.drive.transitions, plan_transitions('fault', OE, 'csp'))
         # Bit 7 low before the edge, released after it, then the way up.
         self.assertEqual(rig.distinct_words(mark), [0x0000, 0x0080, 0x0000, 0x0006,
                                                     0x0007, 0x000F])
-
-    def test_an_enabled_drive_is_taken_down_to_switched_on_first(self):
-        rig = self.make(state='operation_enabled', modes=(8,))
-        rig.drive.display = 8
-        rig.enable, rig.mode = True, 8
-        rig.valid()
-        self.assertEqual(rig.drive.transitions,
-                         plan_transitions('operation_enabled', 'switched_on')
-                         + plan_transitions('switched_on', 'operation_enabled', 'csp'))
 
     def test_csp_target_follows_actual_until_valid(self):
         rig = self.make(position=-123456)
@@ -416,27 +468,48 @@ class Enabling(TemplateCase):
         self.assertEqual(rig.io['nTargetPosition'], -123456)
         self.assertEqual(rig.io['nModesOfOperation'], 8)
 
+    def test_csv_and_cst_enable_with_zero_set_points(self):
+        for mode, member in ((9, 'nTargetVelocity'), (10, 'nTargetTorque')):
+            with self.subTest(mode=mode):
+                rig = self.make()
+                rig.io[member] = 500  # left over from before
+                rig.enable, rig.mode = True, mode
+                rig.valid()
+                self.assertEqual(rig.io[member], 0)
+
     def test_set_points_are_the_callers_once_valid(self):
         rig = self.running(position=500)
-        rig.caller = lambda r: r.io.__setitem__('nTargetPosition',
-                                                r.io['nTargetPosition'] + 7)
+        rig.caller = ramp(7)
         rig.run(10)
-        self.assertEqual(rig.drive.position, 570)
+        self.assertEqual(rig.io['nTargetPosition'], 570)
         self.assertTrue(rig.out['bValid'])
 
     def test_mode_bits_pass_only_while_valid(self):
-        rig = self.make(state='switch_on_disabled')
-        rig.io['nModeBits'] = 0xFFFF
+        rig = self.make()
+        rig.always = lambda r: r.io.__setitem__('nModeBits', MODE_BITS)
         rig.enable, rig.mode = True, 1
         rig.valid()
-        self.assertTrue(all(w & MODE_BITS == 0 for w in rig.words[:-1]))
+        self.assertTrue(all(w & MODE_BITS == 0 for w in rig.words))
         rig.scan()
         self.assertEqual(rig.words[-1], 0x000F | MODE_BITS)
+
+    def test_stale_mode_bits_are_cleared_before_valid(self):
+        # A PP handshake cut short by a fault leaves bits 4 and 6 behind.
+        rig = self.running(mode=1)
+        rig.io['nModeBits'] = 0x0050
+        rig.drive.fault()
+        rig.error(ERR['drive_fault'])
+        rig.run(10)
+        rig.pulse_reset()
+        rig.valid()
+        rig.run(3)
+        self.assertEqual(rig.io['nModeBits'], 0)
+        self.assertEqual(rig.words[-1], 0x000F)
 
     def test_mode_zero_is_an_error(self):
         rig = self.make()
         rig.enable = True
-        self.assertTrue(rig.error(ERR['no_mode']))
+        rig.error(ERR['no_mode'])
 
 
 class Disabling(TemplateCase):
@@ -446,77 +519,112 @@ class Disabling(TemplateCase):
         mark = len(rig.drive.transitions)
         rig.enable = False
         rig.at_rest()
-        self.assertEqual(rig.drive.transitions[mark:],
-                         plan_transitions('operation_enabled', 'switch_on_disabled'))
+        self.assertEqual(rig.drive.transitions[mark:], plan_transitions(OE, SOD))
 
     def test_way_down_from_each_other_state(self):
         for start in ('ready_to_switch_on', 'switched_on'):
             with self.subTest(start=start):
                 rig = self.make(state=start)
                 rig.at_rest()
-                self.assertEqual(rig.drive.transitions,
-                                 plan_transitions(start, 'switch_on_disabled'))
+                self.assertEqual(rig.drive.transitions, plan_transitions(start, SOD))
+
+    def test_set_points_are_held_on_the_way_down(self):
+        # Moving in CSP with a following error: the FB must not pull the target back.
+        rig = self.running(position=0)
+        rig.caller = ramp(40)
+        rig.run(10)
+        rig.enable = False
+        rig.at_rest()
 
     def test_disabled_at_rest_is_neither_busy_nor_valid(self):
         rig = self.make()
         rig.run(20)
-        self.assertEqual(rig.out['bBusy'], False)
-        self.assertEqual(rig.out['bValid'], False)
+        self.assertFalse(rig.out['bBusy'])
+        self.assertFalse(rig.out['bValid'])
         self.assertEqual(set(rig.words), {0x0000})
 
     def test_stop_that_does_not_end_is_an_error(self):
         rig = self.running()
         rig.drive.refuse = ('switched_on',)
         rig.enable = False
-        self.assertTrue(rig.error(ERR['stop']))
+        rig.error(ERR['stop'])
         self.assertEqual(rig.words[-1], 0x0007)  # still asking for the stop
 
 
 class QuickStop(TemplateCase):
 
+    STAYS = {'bQuickStopStays': True}
+
     def test_external_quick_stop_is_left_to_finish(self):
         rig = self.running()
         rig.drive.external_quick_stop()
         mark = len(rig.words)
-        self.assertTrue(rig.error(ERR['quick_stop']))
-        rig.until(lambda r: r.drive.state == 'switch_on_disabled', what='end of the stop')
-        held = rig.words[mark:mark + rig.drive.qs_ramp]
-        self.assertEqual(set(held), {0x0002})
+        rig.error(ERR['quick_stop'])
+        rig.until(lambda r: r.drive.state == SOD, what='end of the stop')
+        self.assertEqual(set(rig.words[mark:mark + rig.drive.qs_ramp]), {0x0002})
         rig.run(3)
         self.assertEqual(rig.words[-1], 0x0000)
         rig.pulse_reset()
         rig.valid()
 
     def test_quick_stop_that_stays_is_left_at_standstill(self):
-        rig = self.running(quick_stop_stays=True)
+        rig = self.running(quick_stop_stays=True, config=self.STAYS)
         rig.drive.external_quick_stop()
         mark = len(rig.words)
-        rig.until(lambda r: r.drive.state == 'switch_on_disabled', what='T12')
+        rig.until(lambda r: r.drive.state == SOD, what='T12')
         cut = rig.words.index(0x0000, mark) - mark
-        # The ramp, then tStandstill of no motion; never the timer of a fixed delay.
+        # The ramp, then tStandstill without motion: standstill, not a fixed delay.
         self.assertGreaterEqual(cut, rig.drive.qs_ramp + 50 // CYCLE)
-        self.assertEqual(rig.drive.transitions[-1],
-                         ('quick_stop_active', 'switch_on_disabled', 0x0000))
+        self.assertEqual(rig.drive.transitions[-1], ('quick_stop_active', SOD, 0x0000))
+
+    def test_quick_stop_that_stays_without_the_flag_is_held(self):
+        rig = self.running(quick_stop_stays=True)
+        rig.drive.external_quick_stop()
+        rig.run(200)
+        self.assertEqual(rig.drive.state, 'quick_stop_active')
+        self.assertEqual(rig.words[-1], 0x0002)
 
     def test_jitter_without_a_band_holds_the_quick_stop(self):
-        rig = self.running(quick_stop_stays=True, jitter=1)
+        rig = self.running(quick_stop_stays=True, jitter=1, config=self.STAYS)
         rig.drive.external_quick_stop()
         rig.run(200)
         self.assertEqual(rig.drive.state, 'quick_stop_active')
         self.assertEqual(rig.words[-1], 0x0002)
 
     def test_a_band_over_the_jitter_finds_standstill(self):
-        rig = self.running(quick_stop_stays=True, jitter=1, config={'nStandstillWindow': 2})
+        rig = self.running(quick_stop_stays=True, jitter=1,
+                           config=dict(self.STAYS, nStandstillWindow=2))
         rig.drive.external_quick_stop()
-        rig.until(lambda r: r.drive.state == 'switch_on_disabled', what='T12')
+        rig.until(lambda r: r.drive.state == SOD, what='T12')
+
+    def test_quick_stop_is_not_cut_when_0x6064_is_not_copied(self):
+        # The position the FB reads never moves; the drive must still end the stop.
+        rig = self.make(copy_position=False, qs_ramp=40)
+        rig.enable, rig.mode = True, 9
+        rig.valid()
+        rig.drive.external_quick_stop()
+        rig.until(lambda r: r.drive.state == SOD, what='end of the stop')
+
+    def test_starting_in_a_quick_stop_that_stays(self):
+        rig = self.make(state='quick_stop_active', quick_stop_stays=True, config=self.STAYS)
+        rig.enable, rig.mode = True, 8
+        rig.valid()
+        self.assertEqual(rig.drive.transitions[0], ('quick_stop_active', SOD, 0x0000))
 
 
 class FaultReset(TemplateCase):
 
+    def persistent_fault(self):
+        rig = self.running()
+        rig.drive.fault(persists=True)
+        rig.error(ERR['drive_fault'])
+        rig.run(10)
+        return rig
+
     def test_fault_while_running_then_reset(self):
         rig = self.running()
         rig.drive.fault()
-        self.assertTrue(rig.error(ERR['drive_fault']))
+        rig.error(ERR['drive_fault'])
         rig.run(10)
         self.assertEqual(rig.words[-1], 0x0000)
         mark = len(rig.words)
@@ -526,15 +634,12 @@ class FaultReset(TemplateCase):
                                                     0x0007, 0x000F])
 
     def test_failed_resets_release_bit_7_every_time(self):
-        rig = self.running()
-        rig.drive.fault(persists=True)
-        rig.error(ERR['drive_fault'])
-        rig.run(10)
+        rig = self.persistent_fault()
         mark = len(rig.words)
         rig.pulse_reset()
-        self.assertTrue(rig.error(ERR['reset_failed']))
+        rig.error(ERR['reset_failed'])
         words = rig.words[mark:]
-        edges = [i for i in range(1, len(words)) if words[i] & 0x80 and not words[i - 1] & 0x80]
+        edges = rig.edges_of_bit_7(mark)
         self.assertEqual(len(edges), 3)  # nResetAttempts
         for i in edges:
             high = 0
@@ -544,9 +649,46 @@ class FaultReset(TemplateCase):
             # entered and its timer re-arms on the next, so allow two cycles over.
             self.assertLessEqual(high * CYCLE, 200 + 2 * CYCLE)
             self.assertEqual(words[i + high], 0x0000)
-        self.assertEqual(rig.words[-1], 0x0000)
         rig.run(50)
         self.assertEqual(rig.words[-1], 0x0000)
+
+    def test_attempts_are_paused(self):
+        rig = self.persistent_fault()
+        mark = len(rig.words)
+        rig.pulse_reset()
+        rig.error(ERR['reset_failed'])
+        words, edges = rig.words[mark:], rig.edges_of_bit_7(mark)
+        for a, b in zip(edges, edges[1:]):
+            low = b - a - sum(1 for w in words[a:b] if w & 0x80)
+            self.assertGreaterEqual(low * CYCLE, 100)  # tResetPause
+
+    def test_reset_attempts_restart_on_each_reset(self):
+        rig = self.persistent_fault()
+        mark = len(rig.words)
+        rig.pulse_reset()
+        rig.error(ERR['reset_failed'])
+        rig.pulse_reset()
+        rig.error(ERR['reset_failed'])
+        self.assertEqual(len(rig.edges_of_bit_7(mark)), 6)
+
+    def test_level_reset_resets_once(self):
+        rig = self.persistent_fault()
+        mark = len(rig.words)
+        rig.reset = True
+        rig.run(300)
+        self.assertEqual(len(rig.edges_of_bit_7(mark)), 3)
+        self.assertEqual(rig.out['nErrorID'], ERR['reset_failed'])
+
+    def test_reset_asked_in_fault_reaction_active_is_kept(self):
+        # An application that acknowledges every error at once: bReset := bError.
+        rig = self.make(state='fault_reaction_active', fra_scans=10)
+        rig.enable, rig.mode = True, 8
+        for _ in range(300):
+            rig.reset = bool(rig.out and rig.out['bError'])
+            rig.scan()
+            if rig.out['bValid']:
+                break
+        self.assertTrue(rig.out['bValid'])
 
     def test_reset_works_on_a_drive_that_needs_a_steady_word(self):
         rig = self.running(settle=3)
@@ -570,43 +712,77 @@ class FaultReset(TemplateCase):
         rig2.run(20)
         # In an error while the drive is still in Operation enabled: the reset
         # sequence's 0x0000 would be T9 there.
-        rig3 = self.make()
-        rig3.enable, rig3.mode = True, 8
-        rig3.valid()
+        rig3 = self.running()
         rig3.drive.refuse = ('switched_on',)
         rig3.enable = False
         rig3.error(ERR['stop'])
         rig3.pulse_reset()
         rig3.run(20)
-        self.assertEqual(rig3.drive.state, 'operation_enabled')
+        self.assertEqual(rig3.drive.state, OE)
         self.assertFalse(any(w & 0x80 for w in rig.words + rig2.words + rig3.words))
-        self.assertEqual(rig.drive.violations + rig2.drive.violations, [])
 
 
 class ModeSwitch(TemplateCase):
 
     def test_switch_while_enabled_is_confirmed_on_6061(self):
         rig = self.running(position=40)
-        rig.caller = lambda r: r.io.__setitem__('nTargetPosition',
-                                                r.io['nTargetPosition'] + 3)
+        rig.caller = ramp(3)
         rig.run(5)
-        rig.caller = lambda r: r.io.__setitem__('nTargetVelocity', 250)
+        rig.caller = None
+        rig.run(10)  # come to a standstill before the switch
         rig.mode = 9
         rig.scan()
         self.assertFalse(rig.out['bValid'])
         rig.valid()
         self.assertEqual(rig.drive.display, 9)
         self.assertEqual(rig.io['nModesOfOperation'], 9)
-        self.assertEqual(rig.drive.state, 'operation_enabled')
+        self.assertEqual(rig.drive.state, OE)
+
+    def test_new_modes_set_point_is_made_safe_first(self):
+        # The caller leaves a velocity in 0x60FF while in CSP, where nothing reads it.
+        rig = self.running()
+        rig.caller = lambda r: r.io.__setitem__('nTargetVelocity', 250)
+        rig.run(5)
+        rig.mode = 9
+        rig.valid()
+        self.assertEqual(rig.io['nTargetVelocity'], 250)  # the caller's again
+
+    def test_torque_is_held_through_a_switch_out_of_cst(self):
+        # A hanging axis in CST: zero torque during the switch would let it fall.
+        rig = self.running(mode=10)
+        rig.caller = lambda r: r.io.__setitem__('nTargetTorque', 300)
+        rig.run(5)
+        rig.caller = None
+        rig.mode = 8
+        rig.valid()
+
+    def test_mode_change_during_t4_goes_back_to_set_mode(self):
+        for offset in range(3):
+            with self.subTest(offset=offset):
+                rig = self.make(lag=1)
+                rig.enable, rig.mode = True, 8
+                rig.until(lambda r: r.words[-1] == 0x000F, what='T4')
+                rig.run(offset)
+                rig.mode = 6
+                rig.valid()
+                self.assertEqual(rig.drive.display, 6)
+
+    def test_drop_to_switched_on_during_a_switch_is_an_error(self):
+        rig = self.running(mode_delay=20)
+        rig.mode = 9
+        rig.run(3)
+        rig.drive.drop('switched_on')
+        rig.error(ERR['left_state'])
+        rig.run(50)
+        self.assertNotEqual(rig.drive.state, OE)
 
     def test_unsupported_mode_times_out_and_goes_down(self):
         rig = self.running()
         mark = len(rig.drive.transitions)
         rig.mode = 7
-        self.assertTrue(rig.error(ERR['mode']))
-        rig.until(lambda r: r.drive.state == 'switch_on_disabled', what='way down')
-        self.assertEqual(rig.drive.transitions[mark:],
-                         plan_transitions('operation_enabled', 'switch_on_disabled'))
+        rig.error(ERR['mode'])
+        rig.until(lambda r: r.drive.state == SOD, what='way down')
+        self.assertEqual(rig.drive.transitions[mark:], plan_transitions(OE, SOD))
 
 
 class Homing(TemplateCase):
@@ -625,19 +801,30 @@ class Homing(TemplateCase):
         self.assertEqual(rig.io['nTargetPosition'], -50)
 
     def test_result_of_an_earlier_run_is_not_taken_for_this_one(self):
-        # A drive slow to act on bit 4 (settle) still shows the old 'completed' then.
-        rig = self.make(homing_phase=0x1400, homing_scans=8, settle=3)
+        # A late statusword still shows the old 'completed' after bit 4 rises.
+        rig = self.make(homing_phase=0x1400, homing_scans=8, lag=2)
         rig.enable, rig.mode = True, 6
         rig.until(lambda r: r.words[-1] == 0x001F, what='bit 4')
         started = len(rig.words)
         rig.valid()
         self.assertGreater(len(rig.words) - started, 8)
 
+    def test_retry_after_a_homing_error(self):
+        # The error of the failed run is still showing when bit 4 rises again.
+        rig = self.make(homing_fails=True, lag=2)
+        rig.enable, rig.mode = True, 6
+        rig.error(ERR['homing'])
+        rig.drive.homing_fails = False
+        rig.at_rest()
+        rig.pulse_reset()
+        rig.valid()
+        self.assertEqual(rig.drive.homing_phase, 0x1400)
+
     def test_homing_error_takes_the_drive_down(self):
         rig = self.make(homing_fails=True)
         rig.enable, rig.mode = True, 6
-        self.assertTrue(rig.error(ERR['homing']))
-        rig.until(lambda r: r.drive.state == 'switch_on_disabled', what='way down')
+        rig.error(ERR['homing'])
+        rig.until(lambda r: r.drive.state == SOD, what='way down')
         self.assertEqual(rig.words[-1], 0x0000)
 
     def test_homing_that_does_not_end_times_out(self):
@@ -656,23 +843,84 @@ class Homing(TemplateCase):
         self.assertEqual(rig.words[-1] & 0x10, 0)
         rig.at_rest()
 
+    def test_mode_change_in_the_middle_of_homing(self):
+        rig = self.make(homing_scans=10000, position=300)
+        rig.enable, rig.mode = True, 6
+        rig.until(lambda r: r.words[-1] == 0x001F, what='bit 4')
+        rig.run(5)
+        rig.mode = 8
+        rig.valid()
+        self.assertEqual(rig.drive.homing_phase, 0x0400)  # interrupted
+
+
+class Latency(TemplateCase):
+    """The statusword reaches the FB one to three cycles late, as over a real bus."""
+
+    def test_scenarios_hold_with_a_late_statusword(self):
+        for lag in (1, 2, 3):
+            with self.subTest(lag=lag):
+                rig = self.running(lag=lag)
+                rig.drive.fault()
+                rig.error(ERR['drive_fault'])
+                rig.run(10)
+                rig.pulse_reset()
+                rig.valid()
+                rig.drive.external_quick_stop()
+                rig.error(ERR['quick_stop'])
+                rig.until(lambda r: r.drive.state == SOD, what='end of the stop')
+                rig.pulse_reset()
+                rig.valid()
+                rig.mode = 6
+                rig.valid()
+                rig.mode = 8
+                rig.valid()
+                rig.enable = False
+                rig.at_rest()
+
+    def test_enable_dropped_at_every_scan_of_the_way_up(self):
+        # Dropped while T4 is on its way, 0x0000 would arrive in Operation enabled.
+        for lag in (0, 1, 2):
+            scans = self.running(lag=lag).words.__len__()
+            for drop in range(scans + 2):
+                with self.subTest(lag=lag, drop=drop):
+                    rig = self.make(lag=lag)
+                    rig.enable, rig.mode = True, 8
+                    rig.run(drop)
+                    rig.enable = False
+                    rig.at_rest()
+
+    def test_enable_raised_again_at_every_scan_of_the_way_down(self):
+        for lag in (0, 1, 2):
+            for again in range(8):
+                with self.subTest(lag=lag, again=again):
+                    rig = self.running(lag=lag)
+                    rig.enable = False
+                    rig.run(again)
+                    rig.enable = True
+                    rig.until(lambda r: r.out['bValid'] or r.out['bError'],
+                              what='valid or error')
+                    rig.enable = False
+                    rig.at_rest()
+
 
 class Errors(TemplateCase):
 
-    def test_transition_the_drive_refuses_times_out(self):
-        rig = self.make(refuse=('switched_on',))
-        rig.enable, rig.mode = True, 8
-        n = rig.until(lambda r: r.out['bError'], what='timeout')
-        self.assertEqual(rig.out['nErrorID'], ERR['switch_on'])
-        self.assertGreaterEqual(n * CYCLE, 200)
-        rig.at_rest()  # T7 on the way down
+    def test_transitions_the_drive_refuses_time_out(self):
+        for state, code in (('ready_to_switch_on', 'shutdown'), ('switched_on', 'switch_on'),
+                            (OE, 'enable')):
+            with self.subTest(refused=state):
+                rig = self.make(refuse=(state,))
+                rig.enable, rig.mode = True, 8
+                n = rig.error(ERR[code])
+                self.assertGreaterEqual(n * CYCLE, 200)
+                rig.at_rest()
 
     def test_drive_that_drops_out_is_not_enabled_again_without_reset(self):
         rig = self.running()
-        rig.drive.drop('switch_on_disabled')
-        self.assertTrue(rig.error(ERR['left_state']))
+        rig.drive.drop(SOD)
+        rig.error(ERR['left_state'])
         rig.run(50)
-        self.assertEqual(rig.drive.state, 'switch_on_disabled')
+        self.assertEqual(rig.drive.state, SOD)
         self.assertEqual(rig.words[-1], 0x0000)
         rig.pulse_reset()
         rig.valid()
@@ -680,26 +928,36 @@ class Errors(TemplateCase):
     def test_drive_that_never_boots(self):
         rig = self.make(state='not_ready_to_switch_on', boot_scans=10000)
         rig.enable, rig.mode = True, 8
-        self.assertTrue(rig.error(ERR['not_ready']))
+        rig.error(ERR['not_ready'])
 
     def test_statusword_that_decodes_to_nothing(self):
         rig = self.running()
         rig.drive.override_sw = 0x0005
-        self.assertTrue(rig.error(ERR['statusword']))
-        self.assertEqual(rig.words[-1], 0x000F)  # held until the word decodes again
+        rig.error(ERR['statusword'])
+        self.assertEqual(rig.words[-1], 0x0007)  # the last word, less enable operation
+        rig.pulse_reset()
+        self.assertTrue(rig.out['bError'])  # no reset while the word means nothing
         rig.drive.override_sw = None
-        rig.scan()
-        self.assertEqual(rig.words[-1], 0x0007)  # then the way down, T5
+        rig.until(lambda r: r.drive.state == SOD, what='way down')
+
+    def test_statusword_0000_while_running(self):
+        # Inputs that read 0 (a bus restart, a missing copy) are not Not ready.
+        rig = self.running()
+        rig.drive.override_sw = 0x0000
+        rig.error(ERR['statusword'])
+        rig.run(5)
+        rig.drive.override_sw = None
+        rig.until(lambda r: r.drive.state == SOD, what='way down')
 
     def test_defaults_of_the_config(self):
         rig = Rig(SimDrive(refuse=('switched_on',)))
+        self.rigs.append(rig)
         for name in FAST:
             rig.config[name] = Struct(PROGRAM, 'ST_Cia402Config')[name]
         rig.enable, rig.mode = True, 8
         n = rig.until(lambda r: r.out['bError'], limit=400, what='timeout')
         self.assertGreaterEqual(n * CYCLE, 2000)  # T#2S, plus the scans to get there
         self.assertLess(n * CYCLE, 2100)
-        self.rig = rig
 
 
 class Interpreter(unittest.TestCase):
@@ -729,79 +987,174 @@ class Interpreter(unittest.TestCase):
 
     def test_outside_the_subset(self):
         for text in ('WHILE b DO b := FALSE; END_WHILE', 'x := SHL(x, 1);',
-                     'FOR x := 1 TO 3 DO END_FOR'):
+                     'FOR x := 1 TO 3 DO END_FOR', '{IF defined(X)} b := TRUE; {END_IF}'):
             with self.subTest(text=text), self.assertRaises(StError):
                 self.run_body(text)
 
+    def test_a_name_declared_twice_is_refused(self):
+        with self.assertRaises(StError):
+            self.run_body(';', 'x : WORD; x : BOOL;')
+
     def test_precedence(self):
-        fb = self.run_body('b := 1 + 2 * 3 = 7 AND NOT FALSE;')
-        self.assertTrue(fb['b'])
+        self.assertTrue(self.run_body('b := 1 + 2 * 3 = 7 AND NOT FALSE;')['b'])
 
 
-# One edit per rule, each breaking it in the template's text. A rule whose break no
-# scenario notices has lost its test.
+# One edit per rule, each breaking it in the template's text, and the scenario that
+# must then fail. The edit must match the template exactly once.
 BROKEN_RULES = {
     'quick stop cut with 0x0000': (
-        "stDrive.nControlword := 16#0002;   // let it finish",
-        "stDrive.nControlword := 16#0000;   // let it finish"),
+        'stDrive.nControlword := 16#0002;   // let it finish',
+        'stDrive.nControlword := 16#0000;   // let it finish',
+        QuickStop, 'test_external_quick_stop_is_left_to_finish'),
     'quick stop left on a timer': (
-        "IF fbStandstill.Q THEN\n                    stDrive.nControlword := 16#0000;",
-        "IF fbStandstill.Q OR fbStepTimer.Q THEN\n                    stDrive.nControlword := 16#0000;"),
+        'IF stConfig.bQuickStopStays AND fbStandstill.Q THEN',
+        'IF (stConfig.bQuickStopStays AND fbStandstill.Q) OR fbStepTimer.Q THEN',
+        QuickStop, 'test_jitter_without_a_band_holds_the_quick_stop'),
+    'quick stop left without bQuickStopStays': (
+        'IF stConfig.bQuickStopStays AND fbStandstill.Q THEN',
+        'IF fbStandstill.Q THEN',
+        QuickStop, 'test_quick_stop_is_not_cut_when_0x6064_is_not_copied'),
+    'T16 out of a quick stop': (
+        'stDrive.nControlword := 16#0002;   // let it finish',
+        'stDrive.nControlword := 16#000F;   // let it finish',
+        QuickStop, 'test_quick_stop_that_stays_is_left_at_standstill'),
     'T9 from Operation enabled': (
-        "stDrive.nControlword := 16#0007;   // T5, stops as 0x605C",
-        "stDrive.nControlword := 16#0000;   // T5, stops as 0x605C"),
+        'stDrive.nControlword := 16#0007;   // T5, stops as 0x605C',
+        'stDrive.nControlword := 16#0000;   // T5, stops as 0x605C',
+        Disabling, 'test_way_down_from_operation_enabled_as_the_planner_says'),
+    'Enable operation straight from Switch on disabled': (
+        'stDrive.nControlword := 16#0006;   // T2',
+        'stDrive.nControlword := 16#000F;   // T2',
+        Enabling, 'test_from_each_state_as_the_planner_says'),
     'bit 7 never released': (
-        "IF (eDriveState <> E_Cia402State.Fault) OR fbStepTimer.Q THEN",
-        "IF eDriveState <> E_Cia402State.Fault THEN"),
+        'IF (eDriveState <> E_Cia402State.Fault) OR fbStepTimer.Q THEN',
+        'IF eDriveState <> E_Cia402State.Fault THEN',
+        FaultReset, 'test_failed_resets_release_bit_7_every_time'),
     'bit 7 with the enable bits': (
-        "            stDrive.nControlword := 16#0080;\n",
-        "            stDrive.nControlword := 16#008F;\n"),
+        '            stDrive.nControlword := 16#0080;\n',
+        '            stDrive.nControlword := 16#008F;\n',
+        FaultReset, 'test_fault_while_running_then_reset'),
     'reset outside Fault': (
-        "            IF eDriveState = E_Cia402State.Fault THEN\n                nErrorID    := 0;",
-        "            IF TRUE THEN\n                nErrorID    := 0;"),
+        '            IF eDriveState = E_Cia402State.Fault THEN\n                nErrorID    := 0;',
+        '            IF TRUE THEN\n                nErrorID    := 0;',
+        FaultReset, 'test_reset_is_never_sent_to_a_drive_not_in_fault'),
+    'reset on a level, not an edge': (
+        'ELSIF fbResetTrig.Q THEN\n    bResetRequest := TRUE;',
+        'ELSIF bReset THEN\n    bResetRequest := TRUE;',
+        FaultReset, 'test_level_reset_resets_once'),
+    'no pause between reset attempts': (
+        'tStepLimit := stConfig.tResetPause;',
+        'tStepLimit := cResetSettle;',
+        FaultReset, 'test_attempts_are_paused'),
+    'reset attempts not counted afresh': (
+        '                nResetCount := 0;\n',
+        '',
+        FaultReset, 'test_reset_attempts_restart_on_each_reset'),
+    'reset asked in Fault reaction active dropped': (
+        '        IF bResetRequest THEN',
+        '        IF bResetRequest AND fbResetTrig.Q THEN',
+        FaultReset, 'test_reset_asked_in_fault_reaction_active_is_kept'),
     'stale homing result taken': (
-        "        ELSIF bHomingRunSeen\n              AND",
-        "        ELSIF TRUE\n              AND"),
-    '0x6060 in the same scan as the set-points': (
-        "        IF bHeldLastScan THEN\n            stDrive.nModesOfOperation := nMode;",
-        "        IF TRUE THEN\n            stDrive.nModesOfOperation := nMode;"),
-    'target not held at actual': (
-        "    stDrive.nTargetPosition := stDrive.nPositionActual;\n",
-        ""),
-    'one 0x6F mask for every state': (
-        "IF (stDrive.nStatusword AND 16#004F) = 16#0000 THEN",
-        "IF (stDrive.nStatusword AND 16#006F) = 16#0000 THEN"),
+        '        ELSIF bHomingRunSeen\n              AND ((stDrive.nStatusword AND 16#3400)',
+        '        ELSIF TRUE\n              AND ((stDrive.nStatusword AND 16#3400)',
+        Homing, 'test_result_of_an_earlier_run_is_not_taken_for_this_one'),
+    'stale homing error taken': (
+        '        ELSIF bHomingRunSeen\n              AND ((stDrive.nStatusword AND 16#2000)',
+        '        ELSIF TRUE\n              AND ((stDrive.nStatusword AND 16#2000)',
+        Homing, 'test_retry_after_a_homing_error'),
+    '0x6060 in the same scan as the set-point': (
+        '        IF bSetModeLastScan THEN',
+        '        IF TRUE THEN',
+        ModeSwitch, 'test_new_modes_set_point_is_made_safe_first'),
+    "new mode's velocity not made safe": (
+        '            3, 9:\n                stDrive.nTargetVelocity := 0;',
+        '            3, 9:\n                ;',
+        ModeSwitch, 'test_new_modes_set_point_is_made_safe_first'),
     'mode not confirmed on 0x6061': (
-        "              AND (stDrive.nModesDisplay = nMode)\n        THEN\n            IF eDriveState",
-        "        THEN\n            IF eDriveState"),
-    'drop out re-enabled without reset': (
-        "            nErrorID := cErrLeftState;\n            eStep    := E_Cia402Step.Error;\n        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> stDrive.nModesDisplay)\n        THEN\n            eStep := E_Cia402Step.SetMode;\n        END_IF\n\n    E_Cia402Step.ResetLow:",
-        "            eStep    := E_Cia402Step.Disabled;\n        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> stDrive.nModesDisplay)\n        THEN\n            eStep := E_Cia402Step.SetMode;\n        END_IF\n\n    E_Cia402Step.ResetLow:"),
+        '              AND (stDrive.nModesDisplay = nMode)\n        THEN\n            IF eDriveState',
+        '        THEN\n            IF eDriveState',
+        ModeSwitch, 'test_switch_while_enabled_is_confirmed_on_6061'),
+    'mode change during T4 not seen': (
+        '            ELSIF (nMode <> stDrive.nModesOfOperation)\n                  OR (nMode <> '
+        'stDrive.nModesDisplay)\n            THEN\n                eStep := E_Cia402Step.SetMode;\n'
+        '            ELSIF nMode = 6 THEN',
+        '            ELSIF nMode = 6 THEN',
+        ModeSwitch, 'test_mode_change_during_t4_goes_back_to_set_mode'),
+    'drop during a switch enabled again': (
+        '        ELSIF bDriveMoved\n              OR ((eDriveState',
+        '        ELSIF FALSE\n              OR ((eDriveState',
+        ModeSwitch, 'test_drop_to_switched_on_during_a_switch_is_an_error'),
+    'target not held at actual before T4': (
+        '    stDrive.nTargetPosition := stDrive.nPositionActual;\n    stDrive.nTargetVelocity := 0;',
+        '    stDrive.nTargetVelocity := 0;',
+        Enabling, 'test_csp_target_follows_actual_until_valid'),
+    'velocity not held at 0 before T4': (
+        '    stDrive.nTargetVelocity := 0;\n    stDrive.nTargetTorque   := 0;',
+        '    stDrive.nTargetTorque   := 0;',
+        Enabling, 'test_csv_and_cst_enable_with_zero_set_points'),
+    'torque not held at 0 before T4': (
+        '    stDrive.nTargetTorque   := 0;\n    stDrive.nModeBits       := 0;',
+        '    stDrive.nModeBits       := 0;',
+        Enabling, 'test_csv_and_cst_enable_with_zero_set_points'),
+    'set-points pulled back while enabled': (
+        'ELSIF (eDriveState <> E_Cia402State.OperationEnabled)\n      AND (eDriveState <> '
+        'E_Cia402State.QuickStopActive)\nTHEN',
+        'ELSIF TRUE THEN',
+        Disabling, 'test_set_points_are_held_on_the_way_down'),
+    'stale mode bits kept': (
+        '    stDrive.nModeBits       := 0;\n',
+        '',
+        Enabling, 'test_stale_mode_bits_are_cleared_before_valid'),
+    'caller bits on the first valid scan': (
+        'IF (nMode = 6) OR NOT bRunningLastScan THEN',
+        'IF nMode = 6 THEN',
+        Enabling, 'test_mode_bits_pass_only_while_valid'),
     'mode bits before valid': (
-        "        stDrive.nControlword := 16#0007;   // T3",
-        "        stDrive.nControlword := 16#0007 OR stDrive.nModeBits;   // T3"),
+        '        stDrive.nControlword := 16#0006;   // T2',
+        '        stDrive.nControlword := 16#0006 OR stDrive.nModeBits;   // T2',
+        Enabling, 'test_mode_bits_pass_only_while_valid'),
+    'way down abandons a T4 on its way': (
+        '        ELSIF NOT bEnable THEN\n            eStep := E_Cia402Step.AbortEnable;',
+        '        ELSIF NOT bEnable THEN\n            eStep := E_Cia402Step.Disabled;',
+        Latency, 'test_enable_dropped_at_every_scan_of_the_way_up'),
+    'one 0x6F mask for every state': (
+        'IF (stDrive.nStatusword AND 16#004F) = 16#0000 THEN',
+        'IF (stDrive.nStatusword AND 16#006F) = 16#0000 THEN',
+        Decode, 'test_every_statusword_pattern_against_the_decoder'),
+    'a statusword of 0 taken for Not ready': (
+        'ELSIF bDriveSeen AND (eDriveState = E_Cia402State.NotReadyToSwitchOn) THEN',
+        'ELSIF FALSE THEN',
+        Errors, 'test_statusword_0000_while_running'),
+    'undecodable statusword keeps the drive enabled': (
+        'stDrive.nControlword := stDrive.nControlword AND 16#0007;',
+        ';',
+        Errors, 'test_statusword_that_decodes_to_nothing'),
+    'drop out enabled again without reset': (
+        '            nErrorID := cErrLeftState;\n            eStep    := E_Cia402Step.Error;\n'
+        '        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> '
+        'stDrive.nModesDisplay)\n        THEN\n            eStep := E_Cia402Step.SetMode;\n'
+        '        END_IF\n\n    E_Cia402Step.ResetLow:',
+        '            eStep    := E_Cia402Step.Disabled;\n'
+        '        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> '
+        'stDrive.nModesDisplay)\n        THEN\n            eStep := E_Cia402Step.SetMode;\n'
+        '        END_IF\n\n    E_Cia402Step.ResetLow:',
+        Errors, 'test_drive_that_drops_out_is_not_enabled_again_without_reset'),
 }
 
 
 class BrokenRules(unittest.TestCase):
-    """Every rule broken on purpose makes a scenario fail."""
+    """Every rule broken on purpose makes its scenario fail."""
 
     def test_each_broken_rule_is_caught(self):
         global PROGRAM
-        loader = unittest.TestLoader()
-        scenarios = (Decode, Enabling, Disabling, QuickStop, FaultReset, ModeSwitch, Homing,
-                     Errors)
         try:
-            for rule, (old, new) in BROKEN_RULES.items():
+            for rule, (old, new, case, test) in BROKEN_RULES.items():
                 with self.subTest(rule=rule):
                     self.assertEqual(ST_TEXT.count(old), 1, 'the edit no longer applies')
                     PROGRAM = Program(ST_TEXT.replace(old, new))
-                    suite = unittest.TestSuite(loader.loadTestsFromTestCase(c)
-                                               for c in scenarios)
-                    runner = unittest.TextTestRunner(stream=io.StringIO(), failfast=True)
-                    result = runner.run(suite)
-                    self.assertTrue(result.failures or result.errors,
-                                    'no scenario failed')
+                    result = unittest.TextTestRunner(stream=io.StringIO()).run(case(test))
+                    self.assertFalse(result.wasSuccessful(), f'{case.__name__}.{test} '
+                                                             f'still passes')
         finally:
             PROGRAM = Program(ST_TEXT)
 

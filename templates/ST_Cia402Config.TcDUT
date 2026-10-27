@@ -4,10 +4,11 @@
     <Declaration><![CDATA[TYPE ST_Cia402Config :
 STRUCT
     tStateTimeout     : TIME := T#2S;     // each transition, the mode switch
-    tStopTimeout      : TIME := T#10S;    // the stop from Operation enabled
+    tStopTimeout      : TIME := T#10S;    // each step of the way down
     tHomingTimeout    : TIME := T#60S;    // one whole homing run
-    nResetAttempts    : UINT := 3;        // fault resets before giving up
+    nResetAttempts    : UINT := 3;        // fault resets; 0 counts as 1
     tResetPause       : TIME := T#1S;     // between two reset attempts
+    bQuickStopStays   : BOOL := FALSE;    // 0x605A is 5-8 on this drive
     nStandstillWindow : DINT := 0;        // position band, 0x6064 units
     tStandstill       : TIME := T#100MS;  // in the band this long: stopped
 END_STRUCT
