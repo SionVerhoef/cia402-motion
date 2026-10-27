@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `templates/`: `FB_Cia402Axis`, a function block for one axis, as TwinCAT 3 files (POU and four
+  DUTs) and as one plain `.st`, with PDO mapping tables for CSP and PP. It confirms every command
+  on the statusword with a timeout, resets faults with an edge on bit 7 that is released after
+  every attempt, leaves Quick stop active only at standstill or when the drive does, stops with
+  T5 and never T9, and holds the set-points safe across enabling, homing and the mode switch.
+  Reviewed and run against a simulated drive, never on hardware.
+- Tests: `tests/st_subset.py` runs the template's Structured Text against a simulated drive;
+  every scenario keeps the state-machine rules, and breaking each rule makes one fail. CI runs
+  twincat-st's `st_review.py` and `tcpou.py check` on `templates/`.
 - `SKILL.md` body: the rules, the tool, a routing table and the hand-offs to the sibling skills.
   `decode` is down to one line. Without the skill, current models decode correctly; they go
   wrong on ordering in code and on vendor facts.

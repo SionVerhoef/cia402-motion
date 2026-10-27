@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <DUT Name="ST_Cia402Config" Id="{70c0f2f9-addd-4b57-bccd-dc623a854d93}">
+    <Declaration><![CDATA[TYPE ST_Cia402Config :
+STRUCT
+    tStateTimeout     : TIME := T#2S;     // each transition, the mode switch
+    tStopTimeout      : TIME := T#10S;    // the stop from Operation enabled
+    tHomingTimeout    : TIME := T#60S;    // one whole homing run
+    nResetAttempts    : UINT := 3;        // fault resets before giving up
+    tResetPause       : TIME := T#1S;     // between two reset attempts
+    nStandstillWindow : DINT := 0;        // position band, 0x6064 units
+    tStandstill       : TIME := T#100MS;  // in the band this long: stopped
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

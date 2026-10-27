@@ -60,6 +60,20 @@ jobs:
           ! grep -rnE '/[h]ome/|/[p]rojects/|[C]:\\Users' \
               --include='*.md' --include='*.py' --include='*.yml' . || exit 1
 
+      # The PLC templates must pass the reviewer and the file check of twincat-st, the
+      # skill that owns PLC code. Pinned to a release, so that a new rule there turns this
+      # build red only when the pin moves. Last, so the standalone greps above never
+      # see that checkout.
+      - uses: actions/checkout@v4
+        with:
+          repository: SionVerhoef/twincat-st
+          ref: v0.5.0
+          path: .twincat-st
+      - name: templates pass twincat-st's reviewer and file check
+        run: |
+          python .twincat-st/scripts/st_review.py templates/ --fail-on high
+          python .twincat-st/scripts/tcpou.py check templates/*.TcPOU templates/*.TcDUT
+
   # Engineers run the tool on Windows, where stdout is a legacy code page.
   test-windows:
     runs-on: windows-latest

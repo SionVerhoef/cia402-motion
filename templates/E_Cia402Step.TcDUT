@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <DUT Name="E_Cia402Step" Id="{9ebbec3c-8a32-4ead-8e44-abccd323acec}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+TYPE E_Cia402Step :
+(
+    Disabled        := 0,   // switched off, or on the way down
+    WaitReady       := 10,  // T1: the drive leaves by itself
+    Shutdown        := 11,  // T2: 0x0006
+    SwitchOn        := 12,  // T3: 0x0007
+    SetMode         := 13,  // 0x6060 written, 0x6061 awaited
+    EnableOperation := 14,  // T4: 0x000F
+    Homing          := 20,  // controlword bit 4 held high
+    Running         := 30,  // bValid: the set-points are the caller's
+    ResetLow        := 40,  // bit 7 low, so that the next write is an edge
+    ResetEdge       := 41,  // T15: 0x0080
+    ResetRelease    := 42,  // bit 7 low again, after every attempt
+    ResetPause      := 43,  // before the next attempt
+    Error           := 90   // on the way down, waiting for bReset
+) INT;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

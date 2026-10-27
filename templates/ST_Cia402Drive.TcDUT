@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <DUT Name="ST_Cia402Drive" Id="{1ef61cea-b0b3-4865-ae01-9923f3d96540}">
+    <Declaration><![CDATA[TYPE ST_Cia402Drive :
+STRUCT
+    // Drive to PLC (TxPDO): copy in, or link, before each call.
+    nStatusword       : WORD;   // 0x6041
+    nModesDisplay     : SINT;   // 0x6061
+    nPositionActual   : DINT;   // 0x6064
+    // PLC to drive (RxPDO): copy out, or link, after each call.
+    nControlword      : WORD;   // 0x6040, written by the FB only
+    nModesOfOperation : SINT;   // 0x6060, written by the FB only
+    nTargetPosition   : DINT;   // 0x607A, held at 0x6064 until bValid
+    nTargetVelocity   : DINT;   // 0x60FF, held at 0 until bValid
+    nTargetTorque     : INT;    // 0x6071, held at 0 until bValid
+    // Caller to FB.
+    nModeBits         : WORD;   // controlword bits 4-6, 8, 9 while bValid
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
