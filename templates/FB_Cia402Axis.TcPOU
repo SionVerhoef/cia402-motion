@@ -10,6 +10,12 @@
     anyone stands near the machine. It is not a safety function: STO, SS1
     and safe stops belong in a safety controller.
 
+    WHEN TO USE IT
+    For a drive that makes the motion itself (PP, PV, PT, drive-based
+    homing), or a PLC with no motion runtime. Where TwinCAT NC or CODESYS
+    SoftMotion can drive the axis, use its axis and the MC_ blocks instead.
+    Never both on one drive: both would write 0x6040.
+
     CONTRACT
     Call it once per cycle, unconditionally, in the task that exchanges the
     drive's process data. Copy 0x6041, 0x6061 and 0x6064 into stDrive

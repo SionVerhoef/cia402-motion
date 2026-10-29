@@ -11,6 +11,21 @@ it down again, and resets faults, keeping to the rules in `../references/state-m
 > function: STO, SS1 and safe stops belong in a safety controller
 > (`../references/safety-boundary.md`).
 
+## When to use it
+
+The FB does for one axis what a motion runtime's drive layer does: the state machine (as
+`MC_Power` does), fault reset (`MC_Reset`), the mode of operation and drive-based homing. It
+generates no trajectory: `MC_MoveAbsolute` and the other motion blocks have no counterpart here.
+
+- **Use it when the drive makes the motion**: profile position, velocity or torque (PP, PV, PT)
+  and drive-based homing. A stepper doing point-to-point moves, a conveyor or spindle in velocity
+  mode, an axis that only homes. Also on a PLC with no motion runtime.
+- **Where TwinCAT NC or CODESYS SoftMotion can drive the axis, use that instead.** Link the
+  drive to an NC or SoftMotion axis and move it with the MC_ blocks (the **twincat-motion** skill
+  covers TwinCAT). That gives you the trajectory, gearing, cams and coordinated motion. In CSP
+  this FB leaves the trajectory to you, which is only worth it without a motion runtime.
+- **Never both on one drive.** An NC or SoftMotion axis and this FB would both write 0x6040.
+
 ## Files
 
 | File | What |

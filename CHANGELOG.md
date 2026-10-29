@@ -8,7 +8,9 @@
   every attempt, leaves Quick stop active only at standstill or when the drive does, stops with
   T5 and never T9, holds the set-points safe before T4 and never steps one the enabled drive is
   following, and confirms the mode on 0x6061. Reviewed and run against a simulated drive, never
-  compiled and never run on hardware.
+  compiled and never run on hardware. For a drive that makes the motion itself, or a PLC with no
+  motion runtime; where TwinCAT NC or CODESYS SoftMotion can drive the axis, their axis and MC_
+  blocks remain the choice.
 - Tests: `tests/st_subset.py` runs the template's Structured Text against a simulated drive whose
   statusword can arrive up to three cycles late; every scenario keeps the state-machine rules,
   and each rule broken on purpose makes the scenario named for it fail. CI runs twincat-st's

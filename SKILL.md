@@ -87,7 +87,7 @@ Load a reference when the task reaches it, not all of them up front.
 | CANopen: NMT, COB-IDs, SYNC, PDO setup, heartbeat | `references/canopen-transport.md` |
 | A specific vendor's drive | `references/vendors/README.md`, then the vendor's page |
 | STO, SS1, SLS, FSoE, E-stop, any SIL/PL claim | `references/safety-boundary.md` |
-| PLC code that drives the state machine: start from the template, don't write it fresh | `templates/README.md`, then `templates/FB_Cia402Axis.st` (or the TwinCAT files) |
+| PLC code that drives the state machine itself, where no TwinCAT NC or CODESYS SoftMotion axis will: profile modes, drive-based homing, a PLC without a motion runtime. Start from the template; don't write it fresh | `templates/README.md` ("When to use it" first), then `templates/FB_Cia402Axis.st` or the TwinCAT files |
 
 ## Hand-offs
 
