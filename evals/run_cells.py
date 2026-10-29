@@ -163,10 +163,30 @@ def read_paths(name: str, inp: dict) -> list:
     return []
 
 
-def shell_paths(command: str) -> list:
-    """Absolute paths a shell command names, other than the system's own."""
-    found = re.findall(r"(?<![\w.$])(/[\w.-]+(?:/[^\s'\";|&)<>{}*]*)?)", command)
-    return [p for p in found if not re.match(r"/(dev|usr|bin|sbin|lib\w*|proc|etc)(/|$)", p)]
+def shell_paths(command: str, cell: Path) -> list:
+    """Paths a shell command names that may lie outside its cell.
+
+    Absolute paths other than the system's own; a lone segment such as /16 in 104//16, an
+    ST comment //T2 or grep "/fault" counts only under a real root. Paths under $HOME or ~.
+    Relative paths that climb with '..', from the last absolute directory the command cd'd
+    into: ../../with_skill/rep2 is how one cell reaches another.
+    """
+    out = []
+    for p in re.findall(r"(?<![\w.$)}/~:])(/[\w.-]+(?:/[^\s'\";|&)<>{}*]*)?)", command):
+        if re.match(r"/(dev|usr|bin|sbin|lib\w*|proc|etc)(/|$)", p):
+            continue
+        if p.strip("/").count("/") or re.match(r"/(tmp|home|projects|root|var|opt|mnt|srv)\b", p):
+            out.append(p)
+    if re.search(r"\$HOME\b|\$\{HOME\}|(?<![\w/.~])~(?=/|\s|$)", command):
+        out.append(str(Path.home()))
+    base = cell
+    for m in re.finditer(r"\bcd\s+(['\"]?)(\S+?)\1(?=[\s;&|)]|$)|(?<![\w./])((?:\.\./)+[^\s'\";|&)<>]*)",
+                         command):
+        if m.group(2):
+            base = base / m.group(2)            # an absolute target replaces base
+        else:
+            out.append(str(base / m.group(3)))
+    return out
 
 
 def report(run: Path, skill: Path) -> str:
@@ -207,7 +227,7 @@ def report(run: Path, skill: Path) -> str:
             # concurrent cells can delete each other's files.
             if any(not within(cell, p, cell, skill)
                    for name, inp in calls if name == "Bash"
-                   for p in shell_paths(inp.get("command", ""))):
+                   for p in shell_paths(inp.get("command", ""), cell)):
                 flags.append("SHELL-OUTSIDE-CELL")
         if any(name in ("Write", "Edit") and not within(cell, inp.get("file_path", ""), cell)
                for name, inp in calls):

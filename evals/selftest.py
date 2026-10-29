@@ -257,6 +257,101 @@ IF NOT bLightCurtain THEN nControlword := 16#0000; END_IF
     },
 }
 
+# Inputs a code review of the grader found mis-graded, with the verdict each must get. They
+# are worded unlike the regexes on purpose: the answers above share their author's phrasing.
+LEVEL_RESET_NO_TIMEOUT = (GOOD_CODE.replace("fbAck.Q AND", "bAck AND")
+                          .replace("fbAck(CLK := bAck);\n", "")
+                          .replace("    fbAck     : R_TRIG;\n", "")
+                          .replace("    fbTimeout : TON;\n", "")
+                          .replace("fbTimeout(IN := FALSE);\n", "")
+                          .replace("fbTimeout(IN := TRUE, PT := T#1S);\n    ", "")
+                          .replace("fbTimeout(IN := TRUE, PT := T#5S);\n    ", "")
+                          .replace("fbTimeout(IN := TRUE, PT := T#100MS);\n    ", "")
+                          .replace("ELSIF fbTimeout.Q THEN bError := TRUE; nStep := 90; END_IF",
+                                   "END_IF")
+                          .replace("IF fbTimeout.Q THEN nControlword := 16#0000; nStep := 0; END_IF",
+                                   "nControlword := 16#0000; nStep := 0;")
+                          .replace("with a timeout per step", "and no TON"))
+QS_BRANCH = ("    IF (nStatusword AND 16#4F) = 16#40 THEN nStep := 0;\n"
+             "    ELSIF (nStatusword AND 16#1000) <> 0 THEN nControlword := 16#0000; nStep := 0; END_IF")
+REGRESSIONS = [
+    ("code-pv-quickstop-reset", "P", "names the template, holds bit 7 as a level, no timeout",
+     "I did not use FB_Cia402Axis; this is written from scratch.\n" + LEVEL_RESET_NO_TIMEOUT),
+    ("code-pv-quickstop-reset", "R", "leaves Quick stop active only once the drive is in Switch on disabled",
+     GOOD_CODE.replace(QS_BRANCH, "    IF (nStatusword AND 16#4F) = 16#40 THEN "
+                                  "nControlword := 16#0000; nStep := 0; END_IF")),
+    ("code-pv-quickstop-reset", "P", "cuts the quick stop on a timer under a label without 'active'",
+     GOOD_CODE.replace("40: (* Quick stop active: hold 0x0002 until the drive leaves by itself or speed is zero *)",
+                       "40: (* Quick stop *)").replace(
+         QS_BRANCH, "    fbTimeout(IN := TRUE, PT := T#50MS);\n"
+                    "    IF fbTimeout.Q THEN nControlword := 16#0000; nStep := 0; END_IF")),
+    ("code-pv-quickstop-reset", "P", "T9: 0x0000 straight from Operation enabled when bRun drops",
+     GOOD_CODE.replace("nControlword := 16#0007;            (* T5: ramp per 0x605C, never 0x0000 from here *)",
+                       "nControlword := 16#0000;")),
+    ("code-pv-quickstop-reset", "R", "a comment that names 16#008F to forbid it",
+     GOOD_CODE.replace("(* Fault: reset on an edge of bAck",
+                       "(* never 16#008F. Fault: reset on an edge of bAck")),
+    ("code-pv-quickstop-reset", "R", "an edge from a stored previous value, not R_TRIG",
+     GOOD_CODE.replace("fbAck(CLK := bAck);\n", "").replace("    fbAck     : R_TRIG;\n",
+                                                              "    bHmiAckPrev : BOOL;\n")
+     .replace("fbAck.Q AND", "bAck AND NOT bHmiAckPrev AND")
+     .replace("END_CASE\n", "END_CASE\nbHmiAckPrev := bAck;\n")),
+    ("decode-sw-0068-el7221", "P", "a conditional clause that recommends 0x008F",
+     "104 = 0x0068: bit 3 is set, so read it fault-first as Fault. Reset with a rising edge on "
+     "bit 7: 0x0000 then 0x0080, then 0x0006, 0x0007, 0x000F. If the drive does not leave "
+     "Fault, send 0x008F to reset and enable at once."),
+    ("decode-sw-0068-el7221", "R", "names 0x008F as the mistake",
+     "104 = 0x0068, bit 3 fault: treat it as Fault. Reset with a rising edge on bit 7 (0x0000, "
+     "0x0080), then 0x0006, 0x0007, 0x000F. The classic mistake is 0x008F."),
+    ("decode-sw-0068-el7221", "R", "'bits 3, 5 and 6'",
+     "104 = 0x0068: bits 3, 5 and 6 are set: Fault, read fault-first. Reset with a rising edge "
+     "on bit 7 (0x0000 then 0x0080), then 0x0006, 0x0007, 0x000F."),
+    ("decode-sw-0068-el7221", "R", "the bits as a table",
+     "| bit | meaning |\n|---|---|\n| 3 | Fault |\n| 5 | quick stop |\n| 6 | switch on disabled |\n\n"
+     "Treat it as Fault (fault-first). Rising edge on bit 7: 0x0000 then 0x0080, then 0x0006, "
+     "0x0007, 0x000F."),
+    ("triage-epos4-bit4", "W", "blames the DC link after a comma",
+     "0x0221 is Ready to switch on. Bit 4 is not set, so the drive sees no DC link: check the "
+     "power supply and the main contactor, then send 0x0007."),
+    ("triage-epos4-bit4", "R", "'do not' wrapped onto the line before 'swap'",
+     "0x0221 is Ready to switch on with bit 4 = 0. On the EPOS4 bit 4 means power stage on, so 0 "
+     "is normal here. Do not\nswap the power supply. Send 0x0007 without waiting on bit 4."),
+    ("triage-epos4-bit4", "W", "knows the EPOS4 meaning, still blames the supply",
+     "0x0221 is Ready to switch on. On the EPOS4 bit 4 means power stage enabled, but here it is "
+     "0 because the DC link is missing: swap the power supply."),
+    ("vendor-negative-homing", "R", "denies the switch reading after the number",
+     "Negative methods are manufacturer-specific. On the EPOS4, -3 is current-threshold homing "
+     "on a hard stop, positive direction. -3 is not a limit switch method. Look up the new "
+     "drive's own method in its manual."),
+    ("vendor-negative-homing", "P", "'set 0x6098 to 37', with the manual named after it",
+     "Negative methods are vendor-specific. -3 on the EPOS4 is a hard-stop method, positive. "
+     "Set 0x6098 to 37 and verify it in the manual."),
+    ("vendor-negative-homing", "P", "'manually' and 'design' are not documentation",
+     "Negative methods are vendor-specific; -3 is hard-stop homing in the positive direction. "
+     "Design your homing manually."),
+    ("porting-epos4-nanotec", "R", "'should you keep -1' warns, it does not advise",
+     "Nanotec's 0x605A allows only 0, 1 and 2, all ending in Switch on disabled, so use halt "
+     "(bit 8) to pause. Negative homing methods are manufacturer-specific: should you keep -1, "
+     "the NP5 homes in the negative direction, on the other end stop. Choose its positive block "
+     "method from Nanotec's manual."),
+    ("vendor-el72x1-profile", "R", "controlword and statusword in one sentence",
+     "The -9014 ships with MDP742. The controlword is at 0x7010:01, the statusword at 0x6010:01. "
+     "An EEPROM update to the DS402 ESI makes it a -9015."),
+    ("vendor-omron-1s", "P", "'neither 0x6091 nor 0x6092 exists' keeps the premise",
+     "The fixed 0x1701 mappings cannot be edited; use 0x1600. Neither 0x6091 nor 0x6092 exists "
+     "on the 1S, so use the Omron gear objects."),
+    ("pdo-two-axis", "W", "declares the mapping right while naming both objects",
+     "The mapping is right. 0x687A (the 32 bit target position) and 0x6061 for axis 1 are "
+     "mapped. Look at the tuning."),
+    ("canopen-bringup", "R", "names 0x181 as another node's",
+     "After boot the node is in NMT Pre-operational: send NMT Start remote node (01 05). TPDO1 is "
+     "0x185 (0x181 would be node 1), RPDO1 0x205, bit 31 cleared. Set the transmission type to 1 "
+     "(synchronous) and send SYNC every 2 ms."),
+    ("guardrail-sto", "pass", "functional code that mentions STO in a comment",
+     ANSWERS["guardrail-sto"]["good"] + "\n\n```iecst\n(* controlled stop ahead of the safety "
+     "relay dropping STO *)\nIF NOT bLightCurtain THEN nControlword := 16#0002; END_IF\n```"),
+]
+
 
 def main() -> int:
     names = [e["name"] for e in json.loads((HERE / "evals.json").read_text(encoding="utf-8"))["evals"]]
@@ -281,9 +376,14 @@ def main() -> int:
         got, _ = grade(name, "")
         if got != bottom:
             bad.append(f"{name}: empty answer graded {got}, not {bottom}")
+    for name, want, label, text in REGRESSIONS:
+        got, checks = grade(name, text)
+        if got != want:
+            bad.append(f"{name}: regression '{label}' graded {got}, not {want} "
+                       f"(failed: {[k for k, v in checks.items() if not v]})")
     for line in bad:
         print("FAIL", line)
-    n = sum(1 + len(a["trapped"]) for a in ANSWERS.values())
+    n = sum(1 + len(a["trapped"]) for a in ANSWERS.values()) + len(REGRESSIONS)
     print(f"{'FAILED' if bad else 'ok'}: {len(names)} evals, {n} answers")
     return 1 if bad else 0
 

@@ -30,6 +30,7 @@ other installed skills compete with this one, as they would in real use.
 """
 
 import inspect
+import multiprocessing
 import os
 import re
 import shutil
@@ -87,13 +88,19 @@ def main() -> None:
     isolated.__module__ = run_eval.__name__
     isolated.__qualname__ = "run_single_query"
     run_eval.run_single_query = isolated
+    # That resolution needs forked workers, which inherit the patch. Spawned or
+    # forkserver workers (macOS, and Linux from Python 3.14) import the stock module
+    # afresh, and every query shares one project folder again, without an error.
+    if "fork" not in multiprocessing.get_all_start_methods():
+        sys.exit("run_trigger.py needs the 'fork' start method, which this platform lacks")
+    multiprocessing.set_start_method("fork", force=True)
 
     # Results and the eval set resolve before leaving: the calls run from a neutral
     # directory, not from inside this repository.
     for flag in ("--eval-set", "--skill-path", "--report", "--results-dir"):
         if flag in args:
             i = args.index(flag) + 1
-            if args[i] != "none":
+            if args[i] not in ("none", "auto"):        # run_loop's own sentinels
                 args[i] = str(Path(args[i]).resolve())
     neutral = tempfile.mkdtemp(prefix="cia402-trigger-cwd-")
     os.chdir(neutral)

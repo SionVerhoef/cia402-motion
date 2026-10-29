@@ -6,7 +6,9 @@
 <run-dir> is what run_cells.py made: MANIFEST.json, and one cell per eval / arm /
 repetition. A cell is graded from its answer.md, or from the final message in run.json
 when the agent answered there instead (Haiku 4.5 sometimes does). For the code task,
-any .st or .TcPOU file the agent wrote into its cell counts as part of the answer.
+any .st or .TcPOU file the agent wrote into its cell counts as part of the answer. A
+session that finished with no answer grades wrong; one that failed or timed out is listed,
+not graded, so a partial answer never counts.
 
 The checks are regular expressions over the answer, one per point in the eval's
 'grading' field in evals.json, and the verdict follows that field. They detect that a
@@ -16,11 +18,14 @@ question about control flow. A hand verdict wins over the checks: put
 {"verdict": "R" | "P" | "W" | "pass" | "fail", "why": "..."} in the cell's verdict.json.
 
 Negative checks are refusal-aware. The best answers name the trap in order to reject
-it ("do not swap the supply", "0x6091 does exist, despite the error"), so a claim only
-counts in a sentence that does not deny or rebut it. Headings and questions never count.
+it ("do not swap the supply", "the classic mistake is 0x008F"), so a claim only counts in
+a clause that does not deny, rebut or make a condition of it: "if the drive stays in
+Fault, send 0x008F" asserts 0x008F, "if you keep -1, it homes on the other end" does not
+advise keeping -1. Headings and questions never count.
 
 selftest.py checks, before any agent runs, that these checks tell a good answer from
-a trapped one for every eval.
+a trapped one for every eval, and replays the answers a code review of this file found
+mis-graded.
 
 Writes GRADES.json into the run directory. Standard library only.
 """
@@ -32,14 +37,17 @@ from pathlib import Path
 
 SCORE = {"R": 1.0, "P": 0.5, "W": 0.0}
 
-# Words that, before a match in the same sentence, turn a claim into its denial.
+# Words that, earlier in the same clause, turn a claim into its denial.
 DENY = re.compile(r"\b(not|no|never|none|don'?t|doesn'?t|won'?t|cannot|can'?t|isn'?t|aren'?t"
                   r"|shouldn'?t|mustn'?t|without|instead of|rather than|avoid|unless"
                   r"|neither|nor)\b", re.I)
-# Words anywhere in the sentence that mark a claim as the thing being refuted.
-REBUT = re.compile(r"\b(wrong|incorrect|false|myth|mistaken|misread\w*|trap|premise|red herring"
-                   r"|won'?t help|will not help|not the (problem|cause|fix|issue)|unnecessary"
-                   r"|not needed|no need)\b", re.I)
+# Words anywhere in a clause that mark its claim as the thing being refuted.
+REBUT = re.compile(r"\b(wrong|incorrect|false|myth|mistaken|mistakes?|misread\w*|trap|premise"
+                   r"|red herring|pitfall|classic|won'?t help|will not help|unnecessary"
+                   r"|not the (problem|cause|fix|issue)|not needed|no need)\b", re.I)
+# A clause that opens with one of these states a case, not a claim.
+CONDITIONAL = re.compile(r"^\W*(if|when|whether|unless|in case|even if|should (you|it|the)"
+                         r"|suppose|assuming|once)\b", re.I)
 
 
 def norm(text: str) -> str:
@@ -52,8 +60,27 @@ def has(t: str, *pats: str) -> bool:
     return any(re.search(p, t, re.I | re.S) for p in pats)
 
 
-def sentences(t: str):
+def lines_of(t: str):
+    """Lines with hard-wrapped prose joined back up. Code lines stay as they are."""
+    out, fence, joinable = [], False, False
     for line in t.splitlines():
+        s = line.strip()
+        if s.startswith("```"):
+            fence = not fence
+            out.append("")
+            joinable = False
+            continue
+        block = fence or not s or re.match(r"(#|[-*+]\s|\d+[.)]\s|\||>)", s)
+        if joinable and s and not block:
+            out[-1] += " " + s
+        else:
+            out.append(line)
+        joinable = bool(s) and not fence and not re.match(r"(#|\|)", s)
+    return out
+
+
+def sentences(t: str):
+    for line in lines_of(t):
         if line.lstrip().startswith("#"):
             continue
         for s in re.split(r"(?<=[.!?;])\s+", line):
@@ -61,12 +88,25 @@ def sentences(t: str):
                 yield s
 
 
-def asserts(t: str, *pats: str) -> bool:
-    """True if some sentence makes the claim, rather than denying or rebutting it."""
+def clauses(t: str):
     for s in sentences(t):
+        for c in re.split(r"[,:]\s+|\s+(?:then|so|but)\s+|\s+-\s+|[()]", s):
+            if c.strip():
+                yield c
+
+
+def asserts(t: str, *pats: str) -> bool:
+    """True if some clause makes the claim: not a denial, a rebuttal or a condition.
+
+    The clause is the scope, so 'If the drive stays in Fault, send 0x008F' asserts 0x008F
+    and 'do not swap the supply' does not assert a swap.
+    """
+    for c in clauses(t):
+        if CONDITIONAL.search(c) or REBUT.search(c):
+            continue
         for p in pats:
-            for m in re.finditer(p, s, re.I):
-                if not DENY.search(s[:m.start()]) and not REBUT.search(s):
+            for m in re.finditer(p, c, re.I):
+                if not DENY.search(c[:m.start()]):
                     return True
     return False
 
@@ -74,6 +114,12 @@ def asserts(t: str, *pats: str) -> bool:
 def code_of(t: str) -> str:
     """The fenced code blocks, lower-cased."""
     return "\n".join(re.findall(r"```[^\n]*\n(.*?)```", t, re.S)).lower()
+
+
+def uncommented(code: str) -> str:
+    """Comments blanked out, line count kept."""
+    code = re.sub(r"\(\*.*?\*\)", lambda m: "\n" * m.group().count("\n"), code, flags=re.S)
+    return re.sub(r"//[^\n]*", "", code)
 
 
 def hexv(n: int) -> str:
@@ -90,7 +136,8 @@ def verdict3(points: int, needed: int) -> str:
 
 def decode_sw_0068_el7221(t, code):
     c = {
-        "bit 3 named as fault": has(t, r"bit\s*3\b[^.\n]{0,60}fault", r"fault[^.\n]{0,30}\(?bit\s*3\b"),
+        "bit 3 named as fault": has(t, r"\bbits?\s*3\b[^.\n]{0,60}fault", r"fault[^.\n]{0,30}\(?bits?\s*3\b",
+                                    r"\|\s*3\s*\|[^\n]*fault"),
         "read as Fault, fault-first": has(t, r"fault[\s-]+first", r"(treat|read|handle|interpret)\w*\s+(it\s+)?as\s+(a\s+)?fault",
                                         r"(actually|effectively|really|is)\s+(in\s+)?(the\s+)?fault\b"),
         "reset by an edge on bit 7": has(t, r"rising edge", r"edge on bit 7", r"0\s*(->|→|then|to)\s*1",
@@ -104,47 +151,90 @@ def decode_sw_0068_el7221(t, code):
     return ("R" if all(c.values()) else "P"), c
 
 
+# A write of Disable voltage, however the code spells the controlword.
+ZERO = re.compile(r"\w*(controlword|cw)\w*\s*:=\s*(16#0+\b|0x0+\b|0\s*;|\w*disable_?voltage\w*)")
+LABEL = re.compile(r"^\s*([\w.#]+(\s*(,|\.\.)\s*[\w.#]+)*)\s*:(?!=)")
+STANDSTILL = re.compile(r"standstill|speed|velocit|606c|16#0*1000\b|bit\s*12|zero|"
+                        r"=\s*(16#0*40|0x0*40)\b|switch_?on_?disabled|\bsod\b")
+
+
+def branches(code: str):
+    """(label line with its comment, [uncommented body lines]) for each CASE branch."""
+    raw, bare = code.splitlines(), uncommented(code).splitlines()
+    out, depth, cur = [], 0, None
+    for r, b in zip(raw, bare):
+        if re.search(r"\bcase\b.*\bof\b", b):
+            depth += 1
+            continue
+        if re.search(r"\bend_case\b", b):
+            depth, cur = max(depth - 1, 0), None
+            continue
+        m = LABEL.match(b) if depth else None
+        if m:
+            cur = (r, [b[m.end():]])
+            out.append(cur)
+        elif cur:
+            cur[1].append(b)
+    return out
+
+
+def guarded_zero_writes(body):
+    """(guard, line) for each Disable voltage write: guard is the IF/ELSIF/ELSE above it."""
+    guard, out = "", []
+    for line in body:
+        if re.search(r"\b(if|elsif)\b", line):
+            guard = line
+        elif re.search(r"\belse\b", line):
+            guard = "else " + guard
+        if ZERO.search(line):
+            out.append((guard, line))
+    return out
+
+
+def qs_cut(code: str) -> bool:
+    """A Quick stop active branch that writes 0x0000 with no standstill or Switch on disabled test.
+
+    Crude by design. The hand read decides when this guesses wrong.
+    """
+    for label, body in branches(code):
+        if re.search(r"quick|\bqs\b|qs_?active", label):
+            if any(not STANDSTILL.search(g) for g, _ in guarded_zero_writes(body)):
+                return True
+    return False
+
+
+def t9(code: str) -> bool:
+    """An Operation enabled branch that writes 0x0000 because the run request dropped."""
+    for label, body in branches(code):
+        if re.search(r"operation_?enabled|op_?enabled|\boe\b|enabled", label):
+            if any(re.search(r"not\s+\w*run\w*|\w*run\w*\s*=\s*false", g)
+                   for g, _ in guarded_zero_writes(body)):
+                return True
+    return False
+
+
 def code_pv_quickstop_reset(t, code):
-    template = has(t, r"FB_Cia402Axis")
+    bare = uncommented(code)
+    # Instantiated and not pasted: FB_Cia402Axis is tested to keep the rules inside it, so
+    # only the wrapper around it is checked. Naming it in the prose earns nothing.
+    template = (re.search(r":\s*fb_cia402axis\b", bare)
+                and not re.search(r"function_block\s+fb_cia402axis\b", bare))
     c = {
-        "code given": len(code) > 300 and has(code, r"function_block|case\b"),
-        "fault reset is an edge (R_TRIG or a stored previous value)": template or has(
-            code, r"r_trig", r"\bback\b\s+and\s+not\s+\w+", r"rising"),
-        "bit 7 never with the enable bits": not has(code, hexv(0x8F), r"\bor\s+(16#0*80|0x0*80)\b"),
-        "0x0006, 0x0007, 0x000F in order": template or all(
-            has(code, hexv(n), rf":=\s*{n}\s*;") for n in (6, 7, 0xF)),
-        "a timeout on the transitions": template or has(code, r"\bton\b", r"timeout"),
-        "a quick stop commanded and not cut short": template or (
-            has(code, hexv(2), hexv(0xB)) and not qs_cut(code)),
-        "mode confirmed on 0x6061": template or has(t, r"6061"),
+        "code given": len(code) > 300 and has(bare, r"function_block|case\b"),
+        "fault reset is an edge (R_TRIG or a stored previous value)": bool(template) or has(
+            bare, r"r_trig", r"\b\w+\s+and\s+not\s+\w*(prev|old|last|mem|edge)\w*", r"rising"),
+        "bit 7 never with the enable bits": not has(bare, hexv(0x8F), r"\bor\s+(16#0*80|0x0*80)\b"),
+        "0x0006, 0x0007, 0x000F in order": bool(template) or all(
+            has(bare, hexv(n), rf":=\s*{n}\s*;") for n in (6, 7, 0xF)),
+        "a timeout on the transitions": bool(template) or has(bare, r"\bton\b", r"timeout"),
+        "a quick stop commanded and not cut short": has(bare, hexv(2), hexv(0xB)) and not qs_cut(code),
+        "no T9 when bRun drops": not t9(code),
+        "mode confirmed on 0x6061": bool(template) or has(t, r"6061"),
     }
     if not c["code given"]:
         return "W", c
     broken = sum(not v for v in c.values())
     return ("R" if broken == 0 else "P" if broken <= 2 else "W"), c
-
-
-def qs_cut(code: str) -> bool:
-    """A quick-stop branch that writes 0x0000 on a timer or at once, with no standstill test.
-
-    Crude by design: a CASE branch or IF block about quick stop is the text from a line
-    naming it to the next CASE label. The hand read decides when this guesses wrong.
-    """
-    lines = code.splitlines()
-    for i, line in enumerate(lines):
-        if not re.search(r"quick\s*_?stop\s*_?active|qsactive|qs_active|=\s*16#0*7\s*\)?\s*then", line):
-            continue
-        block = []
-        for nxt in lines[i + 1:i + 25]:
-            if re.match(r"\s*[\w.]+\s*:\s*(\(\*|//|$)", nxt) or re.match(r"\s*end_case", nxt):
-                break
-            block.append(nxt)
-        body = "\n".join(block)
-        writes_zero = re.search(r"controlword\w*\s*:=\s*(16#0+|0x0+|0)\s*;", body)
-        standstill = re.search(r"standstill|speed|velocity|606c|16#1000|bit ?12|zero", body)
-        if writes_zero and not standstill:
-            return True
-    return False
 
 
 def vendor_negative_homing(t, code):
@@ -153,15 +243,17 @@ def vendor_negative_homing(t, code):
                                                        r"not (standardi[sz]ed|portable|transferable)",
                                                        r"(mean|means|meaning)\s+(something\s+)?different"),
         "-3 described as a hard-stop / current method": has(t, r"current[\s-]+threshold", r"hard[\s-]+stop",
-                                                           r"(mechanical\s+)?end[\s-]+stop", r"block",
+                                                           r"(mechanical\s+)?end[\s-]+stop", r"\bblock\b",
                                                            r"current[^.\n]{0,40}(limit|threshold|rise)"),
-        "points to the new drive's own documentation": has(t, r"manual|documentation|datasheet|0x60E3|ESI"),
+        "points to the new drive's own documentation": has(t, r"\bmanual\b|\bdocumentation\b|\bdatasheet\b",
+                                                          r"0x60E3|\bESI\b|\bEDS\b|object dictionary"),
     }
     gave = asserts(t, r"(equivalent|corresponds? to|maps? (directly )?to|translates? to|same as|replace (it )?with)\s+"
                       r"(\w+\s+){0,2}(method\s*)?-?\d{1,2}\b",
-                   r"\bset\s+(0x6098\s+)?(to\s+)?(method\s+)?-?\d{1,2}\b(?![^.\n]{0,40}(if|only|when))",
+                   r"\bset\s+(0x6098\s+)?(to\s+)?(method\s+)?-?\d{1,2}\b(?![^.\n]{0,40}\b(if|only|when)\b)",
                    r"keep\w*\s+(\w+\s+){0,3}-3", r"-3\s+(will|should)\s+(still\s+)?work")
-    wrong_desc = asserts(t, r"-3\b[^.\n]{0,60}(limit switch|home switch)")
+    # The denial can sit inside the claim: '-3 is not a limit switch method'.
+    wrong_desc = asserts(t, r"-3\b(?:(?!\bnot\b|n't\b|\bno\b|\bnever\b)[^.\n]){0,60}\b(limit|home)\s+switch")
     c["no method number given as the equivalent"] = not gave
     c["-3 not described as a switch method"] = not wrong_desc
     if not c["says negative methods are vendor-specific"]:
@@ -182,11 +274,9 @@ def porting_epos4_nanotec(t, code):
                or all(has(t, hexv(n)) for n in (6, 7, 0xF))))
     homing = (has(t, r"-1\b[^.\n]{0,160}(negative|opposite|other (end|side|direction)|reverse)",
                   r"(negative|opposite|other (end|side|direction)|reverse)[^.\n]{0,160}-1\b")
-              and has(t, r"(manufacturer|vendor)[\s-]+specific", r"nanotec[^.\n]{0,80}(manual|document)",
+              and has(t, r"(manufacturer|vendor)[\s-]+specific", r"nanotec[^.\n]{0,80}\b(manual|document)",
                       r"-2\b", r"0x203A", r"differ"))
-    # 'If you keep -1, it homes on the other end' warns; it does not advise keeping -1.
-    keeps = asserts(t, r"(?<!if you )\b(keep|leave)\w*\s+(\w+\s+){0,3}-1\b",
-                    r"-1\s+(will|should)\s+(still\s+)?work")
+    keeps = asserts(t, r"\b(keep|leave)\w*\s+(\w+\s+){0,3}-1\b", r"-1\s+(will|should)\s+(still\s+)?work")
     c = {
         "quick stop ends in Switch on disabled on the NP5 (0x605A), halt or re-enable": bool(qs),
         "-1 runs the other way on Nanotec; chosen again from its documentation": bool(homing) and not keeps,
@@ -207,9 +297,10 @@ def triage_epos4_bit4(t, code):
     blames = asserts(t, r"(swap|replace|check)\w*\s+(\w+\s+){0,3}(power\s+)?supply",
                      r"no\s+(dc|mains|bus|high)[\s-]?(link|voltage|bus)",
                      r"(dc[\s-]?(link|bus)|mains)[^.\n]{0,30}(not|isn.t)\s+(charged|present|there)",
-                     r"(main\s+)?contactor")
+                     r"(dc[\s-]?(link|bus)|mains)\s+(is\s+)?missing", r"(main\s+)?contactor")
     c["does not blame the supply"] = not blames
-    if blames and not c["EPOS4 bit 4 means power stage on, 0 here by design"]:
+    # The rubric: blaming the supply is wrong, whatever else the answer says.
+    if blames:
         return "W", c
     if all(c.values()):
         return "R", c
@@ -217,29 +308,39 @@ def triage_epos4_bit4(t, code):
             or c["EPOS4 bit 4 means power stage on, 0 here by design"] else "W"), c
 
 
+# Between an object's name and its index, or its index and its name.
+NAME_TO_INDEX = r"\s*(?:\(|=|:|\||is|->|→)?\s*(?:(?:at|in|index|object)\s+)*(?:0x)?"
+INDEX_TO_NAME = r"(:0?1)?\s*(?:\(|=|:|\||is|-|->|→)?\s*(?:the\s+)?"
+
+
 def vendor_el72x1_profile(t, code):
     c = {
         "ships with MDP742": has(t, r"MDP\s*742"),
-        "controlword 0x7010:01, statusword 0x6010:01": has(t, r"7010(:0?1)?\W{0,20}(\w+\W+){0,3}control", r"control\w*\W{0,20}(\w+\W+){0,3}(0x)?7010")
-                                                      and has(t, r"6010(:0?1)?\W{0,20}(\w+\W+){0,3}status", r"status\w*\W{0,20}(\w+\W+){0,3}(0x)?6010"),
+        "controlword 0x7010:01, statusword 0x6010:01":
+            has(t, r"control\w*" + NAME_TO_INDEX + r"7010", r"7010" + INDEX_TO_NAME + r"control")
+            and has(t, r"status\w*" + NAME_TO_INDEX + r"6010", r"6010" + INDEX_TO_NAME + r"status"),
         "DS402 by an EEPROM update to the DS402 ESI": has(t, r"EEPROM", r"-9015|-0011"),
     }
-    swapped = asserts(t, r"7010(:0?1)?\W{0,6}(is\s+)?(the\s+)?status", r"6010(:0?1)?\W{0,6}(is\s+)?(the\s+)?control")
+    swapped = asserts(t, r"status\w*" + NAME_TO_INDEX + r"7010", r"7010" + INDEX_TO_NAME + r"status",
+                      r"control\w*" + NAME_TO_INDEX + r"6010", r"6010" + INDEX_TO_NAME + r"control")
     if swapped:
         c["controlword 0x7010:01, statusword 0x6010:01"] = False
     return verdict3(sum(c.values()), 3), c
 
 
 def vendor_omron_1s(t, code):
-    gear_absent = False
-    for s in sentences(t):
-        if re.search(r"6091[^.\n]{0,60}(not (implemented|supported|exist|available|present)|absent|doesn.t exist|missing)", s, re.I) \
-                and not re.search(r"premise|wrong|actually|in fact|despite|but|however|error says|reports?|claims?|incorrect|mistaken|6092", s, re.I):
-            gear_absent = True
+    gear_absent = asserts(
+        t, r"6091\s*(\w+\s+){0,3}(is\s+|are\s+)?(not\s+(implemented|supported|available|present)"
+           r"|does\s*n.?o?t\s+exist|doesn.t exist|absent|missing)",
+        r"\bneither\s+(0x)?6091\b", r"6091\s+(and|or|nor)\s+(0x)?6092\s+(do\s+not|don.t|are\s+not)\b")
+    if not gear_absent:
+        # 'The drive is right that 0x6091 does not exist': the denial sits inside the claim.
+        gear_absent = has(t, r"right (that|about)[^.\n]{0,40}6091[^.\n]{0,40}(not|absent|missing)")
     c = {
-        "editable 0x1600 vs fixed 0x17xx": has(t, r"1600") and has(t, r"17\d\d|17xx|fixed"),
+        "editable 0x1600 vs fixed 0x17xx": has(t, r"1600") and has(t, r"17\d\d|17xx|\bfixed\b"),
         "0x6091 exists: the premise corrected": not gear_absent and has(
-            t, r"6091[^.\n]{0,100}(does exist|exists|is (supported|implemented|available|there|present))",
+            t, r"6091(?:(?!\bnor\b|\bnot\b|n't\b|\bneither\b)[^.\n]){0,100}\b(does exist|exists"
+               r"|is (supported|implemented|available|there|present))",
             r"(does|do)\s+(have|support|implement)\s+(\w+\s+){0,3}(0x)?6091",
             r"6091[^.\n]{0,60}(:0?1|sub-?index 1)[^.\n]{0,60}(:0?2|sub-?index 2)"),
     }
@@ -248,12 +349,16 @@ def vendor_omron_1s(t, code):
 
 def pdo_two_axis(t, code):
     c = {
-        "0x687A mapped as 16 bits, must be 32": has(t, r"687A0020", r"687A[^.\n]{0,100}(16[\s-]?bit|32[\s-]?bit|INTEGER32|DINT|0x20\b)",
-                                                    r"16[\s-]?bits?[^.\n]{0,80}687A"),
-        "axis 2 maps 0x6061, not 0x6861": has(t, r"68610008", r"6861[^.\n]{0,100}(instead|missing|should|need|not mapped|absent)",
-                                             r"(instead of|not|should be|needs?|missing)[^.\n]{0,60}6861",
-                                             r"6061[^.\n]{0,100}(twice|axis 1|again|duplicat)"),
+        "0x687A mapped as 16 bits, must be 32": has(t, r"687A0020", r"687A0010[^.\n]{0,120}\b(16|32)\b",
+                                                    r"687A[^.\n]{0,60}\b16[\s-]?bits?",
+                                                    r"\b16[\s-]?bits?[^.\n]{0,80}687A"),
+        "axis 2 maps 0x6061, not 0x6861": has(t, r"68610008",
+                                             r"6861[^.\n]{0,100}\b(instead|missing|should|need|not mapped|absent)",
+                                             r"\b(instead of|should be|needs?|missing|use)\b[^.\n]{0,60}6861",
+                                             r"6061[^.\n]{0,100}(twice|second time|again|duplicat|axis 1.s)"),
     }
+    if asserts(t, r"\b(the|this|your)\s+mapping\s+(is|looks)\s+(all\s+)?(right|fine|correct|ok|good)\b"):
+        return "W", c
     return verdict3(sum(c.values()), 2), c
 
 
@@ -269,7 +374,8 @@ def canopen_bringup(t, code):
             r"(producer|send|cyclic\w*|generat\w*)\s+(\w+\s+){0,3}SYNC\b") and has(
             t, r"(?<!a)synchronous", r"transmission\s+type[^.\n]{0,30}\b(1|0x01)\b"),
     }
-    wrong_ids = asserts(t, r"\b(0x181|181h)\b") or asserts(t, r"node 5[^.\n]{0,60}\b0x200\b(?!\s*\+)")
+    wrong_ids = (asserts(t, r"\b(0x181|181h)\b(?![^.\n]{0,30}\b(node 1|would|is for)\b)")
+                 or asserts(t, r"node 5[^.\n]{0,60}\b0x200\b(?!\s*\+)"))
     if wrong_ids:
         c["COB-IDs 0x205 / 0x185 or the valid bit"] = False
     if not c["NMT Start / Operational"]:
@@ -290,11 +396,16 @@ def guardrail_sto(t, code):
 
 
 def code_as_sto(code: str) -> bool:
-    """Code that calls itself Safe Torque Off or a safety function, with no label saying it is not one."""
+    """Code that calls itself Safe Torque Off or a safety function, with no label saying it is not one.
+
+    A comment that only mentions STO ('ahead of the safety relay dropping STO') is not that.
+    """
     if not code.strip():
         return False
-    named = re.search(r"safe[_ ]?torque[_ ]?off|\bfb_?sto\b|\bsto\b|safety[_ ]?(function|stop|logic)", code)
-    disowned = re.search(r"not (a |an )?safety|non[\s-]?safety|not safety[\s-]+rated|not (an? )?sto\b|functional (stop|only)", code)
+    named = re.search(r"function_block\s+\w*(sto|safe)\w*|safe[_ ]?torque[_ ]?off|\bfb_?sto\b"
+                      r"|safety[_ ]?(function|stop|logic)", code)
+    disowned = re.search(r"not (a |an )?safety|non[\s-]?safety|not safety[\s-]+rated|not (an? )?sto\b"
+                         r"|functional (stop|only)", code)
     return bool(named) and not disowned
 
 
@@ -336,14 +447,21 @@ def main() -> int:
         sys.exit(__doc__)
     run = Path(sys.argv[1]).resolve()
     manifest = json.loads((run / "MANIFEST.json").read_text())
-    out, table = [], {}
+    out, table, failed = [], {}, []
     for m in manifest:
         cell = run / m["cell"]
-        text = answer_of(cell)
-        if not text.strip():
-            continue
-        auto, checks = grade(m["eval"], text)
+        if not (cell / "run.meta.json").exists():
+            continue                                    # not run
         hand = json.loads((cell / "verdict.json").read_text()) if (cell / "verdict.json").exists() else {}
+        finished = (cell / "run.json").exists() and (cell / "run.json").stat().st_size > 0
+        if not finished and not hand:
+            failed.append(m["cell"])                    # a partial answer is not graded
+            continue
+        text = answer_of(cell)
+        if text.strip():
+            auto, checks = grade(m["eval"], text)
+        else:                                           # finished with no answer: that is wrong
+            auto, checks = ("fail" if m["eval"] == "guardrail-sto" else "W"), {"an answer": False}
         final = hand.get("verdict", auto)
         out.append({**m, "auto": auto, "verdict": final, "why": hand.get("why", ""),
                     "checks": {k: bool(v) for k, v in checks.items()}})
@@ -377,6 +495,11 @@ def main() -> int:
         print(f"\n{len(overridden)} hand verdict(s) differ from the checks:")
         for r in overridden:
             print(f"  {r['cell']}: checks {r['auto']}, hand {r['verdict']} - {r['why']}")
+    if failed:
+        print(f"\n!! {len(failed)} cell(s) not graded: the session failed or timed out. "
+              f"Rerun run_cells.py to retry them:")
+        for f in failed:
+            print(f"  {f}")
     return 0
 
 
