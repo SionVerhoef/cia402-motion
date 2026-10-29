@@ -30,6 +30,7 @@ indices, bit numbers and code values are stated as facts, as the sources below r
 | CODESYS SoftMotion, Generic CiA402 Axis configuration page | All rights reserved | Read. Its compatibility parameters are named on `references/vendors/README.md`. |
 | [ICube Robotics `ethercat_driver_ros2`](https://github.com/ICube-Robotics/ethercat_driver_ros2) issue tracker | — | Field cases. Real statuswords from its logs are test values, among them the non-standard 0x0068 an EL7221 reported. |
 | [KickCAT](https://github.com/leducp/KickCAT) | CeCILL-C (read only) | Field practice for the fault reset: a real 0 → 1 edge on bit 7, and a pause before the next command. Restated; no code copied. |
+| [twincat-st](https://github.com/SionVerhoef/twincat-st) | MIT, same maintainer | Tool. The TwinCAT files in `templates/` were scaffolded with its `tcpou.py`, and CI runs its `st_review.py` and `tcpou.py check` on them from release v0.5.0. `FB_Cia402Axis` follows the shape of its `FB_Sequence` template: timers and edge triggers called once, above the state machine, and one step timer re-armed on every step change. Not bundled. |
 
 The decoder's tables started from the maintainer's own earlier statusword decoder.
 
@@ -40,7 +41,7 @@ registered trademark and patented technology, licensed by Beckhoff Automation Gm
 TwinCAT® and Beckhoff® are registered trademarks of and licensed by Beckhoff Automation GmbH.
 IEC is a trademark of the International Electrotechnical Commission. Other product and
 company names, such as maxon, EPOS4, Omron, Synapticon, SOMANET, Nanotec, LinMot, Lenze,
-HIWIN, CODESYS and Texas Instruments, are trademarks of their owners.
+HIWIN, CODESYS, PLCopen and Texas Instruments, are trademarks of their owners.
 
 All are used nominatively — to identify the technology this skill works with. None of these
 organisations is affiliated with this project or endorses it. This project claims no

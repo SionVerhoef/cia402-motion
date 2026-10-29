@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <DUT Name="E_Cia402State" Id="{ff485d62-1d74-4223-93ed-9088ab6c4211}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+TYPE E_Cia402State :
+(
+    NotReadyToSwitchOn  := 0,
+    SwitchOnDisabled    := 1,
+    ReadyToSwitchOn     := 2,
+    SwitchedOn          := 3,
+    OperationEnabled    := 4,
+    QuickStopActive     := 5,
+    FaultReactionActive := 6,
+    Fault               := 7,
+    Unknown             := 8    // no state; or inputs that cannot be true
+) INT;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

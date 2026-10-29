@@ -87,6 +87,7 @@ Load a reference when the task reaches it, not all of them up front.
 | CANopen: NMT, COB-IDs, SYNC, PDO setup, heartbeat | `references/canopen-transport.md` |
 | A specific vendor's drive | `references/vendors/README.md`, then the vendor's page |
 | STO, SS1, SLS, FSoE, E-stop, any SIL/PL claim | `references/safety-boundary.md` |
+| PLC code that drives the state machine itself, where no TwinCAT NC or CODESYS SoftMotion axis will: profile modes, drive-based homing, a PLC without a motion runtime. Start from the template; don't write it fresh | `templates/README.md` ("When to use it" first), then `templates/FB_Cia402Axis.st` or the TwinCAT files |
 
 ## Hand-offs
 
@@ -105,5 +106,7 @@ CiA 402 part.
 
 Built from the profile as vendor manuals and permissive implementations restate it, and from
 the vendor documents named on each vendor page. `cia402.py` is tested against an independent
-model drive and against python-canopen (mode 11 excepted). None of it has been run against a real drive: report
-at that precision.
+model drive and against python-canopen (mode 11 excepted). `FB_Cia402Axis` in `templates/` is
+reviewed with twincat-st's `st_review.py` and run against a simulated drive; it has never been
+compiled. None of it has been run against a real drive: report at that precision, and say
+"reviewed, not run" when you hand out the template.

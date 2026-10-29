@@ -1,0 +1,8 @@
+# TwinCAT object files must arrive byte-exact: a UTF-8 BOM and CRLF, as TwinCAT writes them.
+# -text turns off every line-ending conversion, whatever core.autocrlf says (the Windows CI
+# runner sets it to true).
+*.TcPOU  -text
+*.TcDUT  -text
+# The plain Structured Text is LF on every checkout, so the tests can compare it to the
+# TwinCAT files' text.
+*.st     text eol=lf

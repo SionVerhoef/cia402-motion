@@ -16,8 +16,9 @@ drive won't reach Operation Enabled.
 > for the machine stays with whoever commissions it.
 
 **Status: early development.** Not ready to install yet. The decoder and planner below are
-tested against an independent model of the state machine and against python-canopen; none of
-it has been run against a real drive.
+tested against an independent model of the state machine and against python-canopen. The PLC
+function block in `templates/` is reviewed and run against a simulated drive, never compiled
+in TwinCAT or CODESYS. None of it has been run on hardware.
 
 ## What is in it
 
@@ -27,6 +28,10 @@ it has been run against a real drive.
   drive vendor with the deviations from the profile that were found in that vendor's own
   documents. Each claim carries its source and the date it was read.
 - `scripts/cia402.py`: the tool below.
+- `templates/`: `FB_Cia402Axis`, a Structured Text function block that drives one axis
+  through the state machine, the mode switch, homing and fault reset, as TwinCAT 3 files and
+  as one plain `.st`, with PDO mapping tables for CSP and PP. Status and wiring are in
+  `templates/README.md`.
 
 ## The tool
 
@@ -67,6 +72,12 @@ python3 -m unittest discover -s tests -v
 `tests/test_canopen_oracle.py` cross-checks statusword states, homing phases, commanded
 transitions, mode codes (all but mode 11, which it lacks) and homing-method directions against
 [python-canopen](https://github.com/canopen-python/canopen) when it is installed; CI installs it.
+
+`tests/test_templates.py` runs the function block's own Structured Text against a simulated
+drive, through `tests/st_subset.py`, a small interpreter for the subset the template is written
+in. Every scenario must keep the state-machine rules, and each rule broken on purpose must make
+the scenario named for it fail. CI also runs twincat-st's reviewer and file check on
+`templates/`.
 
 ## Licence
 
