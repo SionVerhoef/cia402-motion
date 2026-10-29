@@ -41,6 +41,7 @@ import concurrent.futures
 import io
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -162,6 +163,12 @@ def read_paths(name: str, inp: dict) -> list:
     return []
 
 
+def shell_paths(command: str) -> list:
+    """Absolute paths a shell command names, other than the system's own."""
+    found = re.findall(r"(?<![\w.$])(/[\w.-]+(?:/[^\s'\";|&)<>{}*]*)?)", command)
+    return [p for p in found if not re.match(r"/(dev|usr|bin|sbin|lib\w*|proc|etc)(/|$)", p)]
+
+
 def report(run: Path, skill: Path) -> str:
     """Per-arm cost, plus an audit of what each cell actually touched."""
     snap = json.loads((skill / "SNAPSHOT.json").read_text())
@@ -196,6 +203,12 @@ def report(run: Path, skill: Path) -> str:
             if any(not within(cell, p, cell, skill)
                    for name, inp in calls for p in read_paths(name, inp)):
                 flags.append("READ-OUTSIDE-CELL")
+            # The smoke run of b03.5 had a cell work in a fixed /tmp folder, where two
+            # concurrent cells can delete each other's files.
+            if any(not within(cell, p, cell, skill)
+                   for name, inp in calls if name == "Bash"
+                   for p in shell_paths(inp.get("command", ""))):
+                flags.append("SHELL-OUTSIDE-CELL")
         if any(name in ("Write", "Edit") and not within(cell, inp.get("file_path", ""), cell)
                for name, inp in calls):
             flags.append("WROTE-OUTSIDE-CELL")

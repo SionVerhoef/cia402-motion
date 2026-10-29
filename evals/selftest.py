@@ -149,7 +149,12 @@ may not exist on the new drive. Its equivalent is method 37, so use that.""",
         "trapped": {
             "W: both work unchanged": """Both are standard CiA 402, so both work unchanged. Clearing bit
 2 is the quick stop, and 0x000F resumes from Quick stop active on any drive. Keep -1.""",
-            "P: quick stop only": """The quick stop differs: Nanotec's 0x605A only allows 0 to 2, which
+            "P: 0x605A = 6 on the NP5 (Opus, smoke run)": """Use halt (bit 8) to pause. The Nanotec
+default for 0x605A is 2, which ends in Switch on disabled, so 0x000F does nothing. If you have
+to keep the quick stop logic, set 0x605A = 6 on the NP5 and store it. Negative homing methods
+are manufacturer-specific: if you keep -1, the NP5 homes in the negative direction, on the
+other end stop.""",
+            "P: quick stop only":"""The quick stop differs: Nanotec's 0x605A only allows 0 to 2, which
 end in Switch on disabled, so use halt (bit 8) for a pause. Homing method -1 will still work.""",
         },
     },

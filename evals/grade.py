@@ -170,7 +170,13 @@ def vendor_negative_homing(t, code):
 
 
 def porting_epos4_nanotec(t, code):
-    qs = (has(t, r"605A")
+    # The NP5 takes 0x605A 0, 1 or 2 only. 'Set 0x605A = 6 on the NP5' is the trap the
+    # Opus baseline fell into in the smoke run.
+    only_0_to_2 = has(t, r"\b0,\s*1,?\s*(and|or)\s*2\b", r"\b0\s*(-|to|through)\s*2\b",
+                      r"T16[^.\n]{0,40}(does not|doesn.t|not) exist", r"\bno T16\b",
+                      r"never stays in quick[\s-]+stop[\s-]+active")
+    sets_6 = asserts(t, r"\bset\s+(\w+\s+){0,2}(0x)?605A\s*(=|to)\s*[5-8]\b")
+    qs = (has(t, r"605A") and only_0_to_2 and not sets_6
           and has(t, r"switch[\s-]+on[\s-]+disabled")
           and (has(t, r"\bhalt\b", r"bit 8\b", hexv(0x10F))
                or all(has(t, hexv(n)) for n in (6, 7, 0xF))))
@@ -178,7 +184,9 @@ def porting_epos4_nanotec(t, code):
                   r"(negative|opposite|other (end|side|direction)|reverse)[^.\n]{0,160}-1\b")
               and has(t, r"(manufacturer|vendor)[\s-]+specific", r"nanotec[^.\n]{0,80}(manual|document)",
                       r"-2\b", r"0x203A", r"differ"))
-    keeps = asserts(t, r"(keep|leave)\w*\s+(\w+\s+){0,3}-1\b", r"-1\s+(will|should)\s+(still\s+)?work")
+    # 'If you keep -1, it homes on the other end' warns; it does not advise keeping -1.
+    keeps = asserts(t, r"(?<!if you )\b(keep|leave)\w*\s+(\w+\s+){0,3}-1\b",
+                    r"-1\s+(will|should)\s+(still\s+)?work")
     c = {
         "quick stop ends in Switch on disabled on the NP5 (0x605A), halt or re-enable": bool(qs),
         "-1 runs the other way on Nanotec; chosen again from its documentation": bool(homing) and not keeps,
