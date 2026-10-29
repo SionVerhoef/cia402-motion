@@ -1,12 +1,10 @@
 ---
 name: cia402-motion
-description: "Use for the CiA 402 / DS402 (IEC 61800-7) drive profile on any vendor's servo or stepper drive, over EtherCAT (CoE) or CANopen: the controlword/statusword state machine, a drive stuck in Switch on disabled or Fault, fault reset, quick stop and halt, modes of operation (CSP, CSV, CST, PP, PV, homing) and the 0x6060/0x6061 mode switch, homing methods (0x6098), touch probe, units and gearing, 0x603F error codes, which objects to map per mode (0x6040, 0x6041, 0x607A, 0x6064) and checking a PDO mapping, CANopen NMT/SYNC/PDO bring-up of a 402 node, and vendor deviations (Beckhoff EL72x1 DS402 vs MDP742, maxon EPOS4, Omron 1S, Synapticon, Nanotec, LinMot, Lenze, HIWIN). Not for TwinCAT NC axis configuration or MC_ blocks (use twincat-motion), EtherCAT network faults (use ethercat-diagnostics) or reading a device's ESI file (use ethercat-esi). Never writes safety functions such as STO or SLS. DRAFT: under development."
+description: "Use for the CiA 402 / DS402 (IEC 61800-7) drive profile on any vendor's servo or stepper drive, over EtherCAT (CoE) or CANopen: the controlword/statusword state machine, a drive stuck in Switch on disabled or Fault, fault reset, quick stop and halt, modes of operation (CSP, CSV, CST, PP, PV, homing) and the 0x6060/0x6061 mode switch, homing methods (0x6098), touch probe, units and gearing, 0x603F error codes, which objects to map per mode (0x6040, 0x6041, 0x607A, 0x6064) and checking a PDO mapping, CANopen NMT/SYNC/PDO bring-up of a 402 node, and vendor deviations (Beckhoff EL72x1 DS402 vs MDP742, maxon EPOS4, Omron 1S, Synapticon, Nanotec, LinMot, Lenze, HIWIN). Not for TwinCAT NC axis configuration or MC_ blocks (use twincat-motion), EtherCAT network faults (use ethercat-diagnostics) or reading a device's ESI file (use ethercat-esi). Never writes safety functions such as STO or SLS."
 ---
 
 # cia402-motion
 
-> **Draft.** This skill is under development and not ready to install.
->
 > **Reference material only. Not for safety functions.** Drive configuration must be
 > reviewed and validated by a qualified engineer against the drive's own documentation.
 

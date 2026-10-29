@@ -1,0 +1,98 @@
+[
+  {
+    "query": "servo drive over ethercat won't enable. statusword sits at 0x0250 no matter what i write to the controlword (6, then 7, then 15). what state is that and what am I missing?",
+    "should_trigger": true
+  },
+  {
+    "query": "DS402 question: after an overcurrent fault our drive stays in Fault even though we send 0x80 in the controlword continuously. The cause is gone. Why doesn't the reset take?",
+    "should_trigger": true
+  },
+  {
+    "query": "I'm bringing up a CANopen servo (node 3) from a Raspberry Pi with python-canopen. SDO reads work, but it never reacts to my RPDOs and never sends TPDOs. How do I get it into CSP with a 1 ms SYNC?",
+    "should_trigger": true
+  },
+  {
+    "query": "What's the actual difference between homing method 35 and 37 in 0x6098? Our drive manual lists both and I just want to set the current position as zero.",
+    "should_trigger": true
+  },
+  {
+    "query": "switching a drive from homing mode to cyclic synchronous position: we write 0x6060 = 8 right after homing finishes and start streaming targets the same cycle. sometimes it jumps. is there a handshake i'm skipping?",
+    "should_trigger": true
+  },
+  {
+    "query": "Beckhoff EL7211-9014 on a non-TwinCAT master (SOEM). I can't find 0x6040/0x6041 anywhere in its PDOs, only 0x7010 and 0x6010 objects. Is this not a DS402 drive?",
+    "should_trigger": true
+  },
+  {
+    "query": "We pause a conveyor by clearing controlword bit 2 and resume with 0x0F. Works on our maxon drives, but on the new Synapticon drive it ends in switch on disabled after the stop. What's different?",
+    "should_trigger": true
+  },
+  {
+    "query": "Which objects do I have to put in the RxPDO and TxPDO for cyclic synchronous velocity mode on an EtherCAT servo? Want the minimum set plus whatever helps diagnostics.",
+    "should_trigger": true
+  },
+  {
+    "query": "PLC with no motion runtime, a stepper drive with CiA 402 over EtherCAT doing point-to-point moves in profile position mode. Can you give me a function block that runs the state machine, homes, and handles fault reset?",
+    "should_trigger": true
+  },
+  {
+    "query": "0x603F reads 0x8611 on our servo and the drive drops to fault during fast moves. What does that code mean and where should I look?",
+    "should_trigger": true
+  },
+  {
+    "query": "profile position mode: first move works, second target never runs. I keep controlword at 0x1F every cycle and change 0x607A. what's the set-point handshake supposed to look like?",
+    "should_trigger": true
+  },
+  {
+    "query": "how do i set up user units on a cia402 drive so 1 unit = 0.01 mm? ballscrew pitch 5 mm, 17-bit encoder, gearbox 3:1. which of 0x608F 0x6091 0x6092 do I need",
+    "should_trigger": true
+  },
+  {
+    "query": "We are porting PLC code from EPOS4 to a Nanotec drive. The EPOS4 homes with method -3. Can I keep that number?",
+    "should_trigger": true
+  },
+  {
+    "query": "TwinCAT 3: my servo is linked to an NC axis and I move it with MC_MoveAbsolute. MC_Power.Status never goes TRUE and the axis shows error 0x4260. How do I get the NC axis enabled?",
+    "should_trigger": false
+  },
+  {
+    "query": "EtherCAT: one slave keeps falling back from OP to SAFEOP with AL status code 0x001B (sync manager watchdog). Network is 12 slaves, line topology. How do I find the cause?",
+    "should_trigger": false
+  },
+  {
+    "query": "Our EtherCAT master reports working counter errors every few minutes and the frame loss counter on port 1 of slave 7 keeps climbing. Cabling or something else?",
+    "should_trigger": false
+  },
+  {
+    "query": "Here is the ESI XML for our I/O terminal. Which PDO assignments does it allow, and what's the default sync manager configuration?",
+    "should_trigger": false
+  },
+  {
+    "query": "Siemens SINAMICS S120 on PROFINET with telegram 1: what do STW1 bit 10 and ZSW1 bit 9 mean, and why won't the drive turn with STW1 = 047F?",
+    "should_trigger": false
+  },
+  {
+    "query": "In TwinCAT structured text, my TON never fires: tonDelay(IN := bStart, PT := T#500MS); bDone := tonDelay.Q; bDone stays false. What am I doing wrong?",
+    "should_trigger": false
+  },
+  {
+    "query": "Our CAN bus at 1 Mbit/s with 30 m of cable gives error frames. Where should the 120 ohm terminators go, and should I drop the bit rate?",
+    "should_trigger": false
+  },
+  {
+    "query": "Arduino driving a TB6600 stepper driver with STEP/DIR pulses. The motor stalls above 600 rpm. Is it my acceleration ramp or the driver current setting?",
+    "should_trigger": false
+  },
+  {
+    "query": "Configure a TwinSAFE logic project: an emergency stop and two light curtains that trigger SS1 on an AX8000 via FSoE. How do I set up the safety project in TwinCAT?",
+    "should_trigger": false
+  },
+  {
+    "query": "Modbus RTU VFD: which holding register sets the frequency reference and which one starts the motor? It's a generic Chinese inverter with a parameter list in the manual.",
+    "should_trigger": false
+  },
+  {
+    "query": "AX5000 over SoE in TwinCAT: what do IDN S-0-0134 and S-0-0135 do, and how do I read the drive's diagnostic message?",
+    "should_trigger": false
+  }
+]
