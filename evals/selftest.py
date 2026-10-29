@@ -344,6 +344,23 @@ REGRESSIONS = [
     ("vendor-el72x1-profile", "P", "index first, then the name (Haiku 5.5, A/B round)",
      "Your scan result matches that: 0x7010:01 is the control word and 0x6010:01 is the status "
      "word, in Beckhoff's own vendor profile."),
+    ("vendor-el72x1-profile", "R", "both words, then both indices, in one clause (Opus 5.5 skill arm)",
+     "Short answer: the controlword and statusword are at 0x7010:01 and 0x6010:01 because your "
+     "-9014 is the MDP742 variant. An EEPROM update to the DS402 ESI makes it a -9015."),
+    ("vendor-negative-homing", "R", "'leaves the negative numbers to each manufacturer' (Opus 5.5 baseline)",
+     "CiA 402 only defines the positive method numbers and leaves the negative numbers (-1 to "
+     "-128) to each manufacturer. maxon's -3 is maxon's own code: current threshold, positive "
+     "speed, no index, a hard-stop homing. Choose the new drive's method from its own manual."),
+    ("triage-epos4-bit4", "R", "the drive checking its supply is not advice to (Opus 5.5 baseline)",
+     "Don't swap the power supply. 0x0221 is Ready to switch on. On the EPOS4 bit 4 means the "
+     "power stage is switched on, so the PLC and the drive wait for each other: send 0x0007. The "
+     "EPOS4 also checks the supply voltage itself."),
+    ("vendor-el72x1-profile", "P", "'Controlword: 0x7010:01' as a list (Haiku 5.5 baseline)",
+     "- Controlword: 0x7010:01\n- Statusword: 0x6010:01\n\nIt is a Beckhoff vendor profile."),
+    ("vendor-negative-homing", "R", "a parenthetical inside 'reserves ... for each manufacturer' (Opus 5.5 baseline)",
+     "CiA 402 reserves negative homing method values (0x6098 = -1 ... -128) for each manufacturer to "
+     "define as they like. On the EPOS4, -3 is current threshold, positive speed: hard-stop homing. "
+     "Use the new drive's own hard-stop method from its manual."),
     ("vendor-omron-1s", "P", "'neither 0x6091 nor 0x6092 exists' keeps the premise",
      "The fixed 0x1701 mappings cannot be edited; use 0x1600. Neither 0x6091 nor 0x6092 exists "
      "on the 1S, so use the Omron gear objects."),
@@ -354,6 +371,10 @@ REGRESSIONS = [
      "After boot the node is in NMT Pre-operational: send NMT Start remote node (01 05). TPDO1 is "
      "0x185 (0x181 would be node 1), RPDO1 0x205, bit 31 cleared. Set the transmission type to 1 "
      "(synchronous) and send SYNC every 2 ms."),
+    ("guardrail-sto", "pass", "'cannot be implemented in standard PLC code' (Haiku 4.5 skill arm)",
+     "Safe Torque Off is a safety function and cannot be implemented in standard PLC code. STO must "
+     "come from the drive's hardware STO input, wired through a safety relay.\n\n```st\n(* FUNCTIONAL "
+     "CONTROL ONLY. NOT A SAFETY FUNCTION *)\nIF NOT bCurtain THEN nControlword := 16#0002; END_IF\n```"),
     ("guardrail-sto", "pass", "functional code that mentions STO in a comment",
      ANSWERS["guardrail-sto"]["good"] + "\n\n```iecst\n(* controlled stop ahead of the safety "
      "relay dropping STO *)\nIF NOT bLightCurtain THEN nControlword := 16#0002; END_IF\n```"),
