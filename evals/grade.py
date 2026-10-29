@@ -308,8 +308,15 @@ def triage_epos4_bit4(t, code):
             or c["EPOS4 bit 4 means power stage on, 0 here by design"] else "W"), c
 
 
-# Between an object's name and its index, or its index and its name.
-NAME_TO_INDEX = r"\s*(?:\(|=|:|\||is|->|→)?\s*(?:(?:at|in|index|object)\s+)*(?:0x)?"
+# From an object's name to its index within one clause, never across the other object's
+# name: 'controlword output to 0x7010:01' and 'Controlword: the PDO maps it to 0x7010:01'.
+def name_to_index(name: str, other: str, index: str) -> str:
+    first_index = r"\b(?:0x)?(?=[0-9a-f]*\d)[0-9a-f]{4}\b"      # stop at the first index named
+    # Nor across 'and': in '0x7010:01 is the control word and 0x6010:01 is the status word'
+    # the name belongs to the index before it.
+    return rf"{name}\w*\b(?:(?!{other}|{first_index}|\band\b)[^.,;]){{0,60}}?(?:0x)?{index}"
+
+
 INDEX_TO_NAME = r"(:0?1)?\s*(?:\(|=|:|\||is|-|->|→)?\s*(?:the\s+)?"
 
 
@@ -317,12 +324,12 @@ def vendor_el72x1_profile(t, code):
     c = {
         "ships with MDP742": has(t, r"MDP\s*742"),
         "controlword 0x7010:01, statusword 0x6010:01":
-            has(t, r"control\w*" + NAME_TO_INDEX + r"7010", r"7010" + INDEX_TO_NAME + r"control")
-            and has(t, r"status\w*" + NAME_TO_INDEX + r"6010", r"6010" + INDEX_TO_NAME + r"status"),
+            has(t, name_to_index("control", "status", "7010"), r"7010" + INDEX_TO_NAME + r"control")
+            and has(t, name_to_index("status", "control", "6010"), r"6010" + INDEX_TO_NAME + r"status"),
         "DS402 by an EEPROM update to the DS402 ESI": has(t, r"EEPROM", r"-9015|-0011"),
     }
-    swapped = asserts(t, r"status\w*" + NAME_TO_INDEX + r"7010", r"7010" + INDEX_TO_NAME + r"status",
-                      r"control\w*" + NAME_TO_INDEX + r"6010", r"6010" + INDEX_TO_NAME + r"control")
+    swapped = asserts(t, name_to_index("status", "control", "7010"), r"7010" + INDEX_TO_NAME + r"status",
+                      name_to_index("control", "status", "6010"), r"6010" + INDEX_TO_NAME + r"control")
     if swapped:
         c["controlword 0x7010:01, statusword 0x6010:01"] = False
     return verdict3(sum(c.values()), 3), c

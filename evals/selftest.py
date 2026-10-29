@@ -337,6 +337,13 @@ REGRESSIONS = [
     ("vendor-el72x1-profile", "R", "controlword and statusword in one sentence",
      "The -9014 ships with MDP742. The controlword is at 0x7010:01, the statusword at 0x6010:01. "
      "An EEPROM update to the DS402 ESI makes it a -9015."),
+    ("vendor-el72x1-profile", "P", "objects named a few words from their indices (Haiku 5.5, A/B round)",
+     "- Controlword: the drive-control PDO maps it to 0x7010:01 (outputs, master to terminal).\n"
+     "- Statusword: the drive-status PDO maps it to 0x6010:01 (inputs).\n\n"
+     "Map your master's controlword output to 0x7010:01 and the statusword input to 0x6010:01."),
+    ("vendor-el72x1-profile", "P", "index first, then the name (Haiku 5.5, A/B round)",
+     "Your scan result matches that: 0x7010:01 is the control word and 0x6010:01 is the status "
+     "word, in Beckhoff's own vendor profile."),
     ("vendor-omron-1s", "P", "'neither 0x6091 nor 0x6092 exists' keeps the premise",
      "The fixed 0x1701 mappings cannot be edited; use 0x1600. Neither 0x6091 nor 0x6092 exists "
      "on the 1S, so use the Omron gear objects."),
