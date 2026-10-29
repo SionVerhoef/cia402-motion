@@ -169,7 +169,7 @@ def shell_paths(command: str, cell: Path) -> list:
     Absolute paths other than the system's own; a lone segment such as /16 in 104//16, an
     ST comment //T2 or grep "/fault" counts only under a real root. Paths under $HOME or ~.
     Relative paths that climb with '..', from the last absolute directory the command cd'd
-    into: ../../with_skill/rep2 is how one cell reaches another.
+    into: climbing two levels into with_skill/rep2 is how one cell reaches another.
     """
     out = []
     for p in re.findall(r"(?<![\w.$)}/~:])(/[\w.-]+(?:/[^\s'\";|&)<>{}*]*)?)", command):

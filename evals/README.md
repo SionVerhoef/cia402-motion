@@ -69,3 +69,11 @@ python3 evals/run_trigger.py check --model <id> --timeout 180 --num-workers 5
 A query counts as triggered only when the model's first tool call loads the skill. The calls
 still load the operator's global Claude Code settings, so other installed skills compete, as
 they would in real use.
+
+**Results for v0.1.0** (2026-10-29, Opus 5.5, three runs per query). With "units and gearing" in
+the description, the user-units query fired in only 1 of 3 runs, so the description now names
+0x608F, 0x6091 and 0x6092. With that description, the 13 queries the skill should take fired in
+38 of 39 runs. The 11 near-misses fired in 2 of 33, both on the TwinCAT NC axis query, which
+fired 1 of 3 in the first run. That query is a real borderline: `MC_Power.Status` never going
+TRUE is where twincat-motion hands a drive that will not enable to this skill, and twincat-motion
+was not installed to compete. Nothing else fired in either run.
