@@ -46,6 +46,7 @@ CELL_TEMPLATE = """# {eval_name} / {arm} / {rep}
 {instruction}
 
 Write your complete reply to `answer.md` in this directory. That file is what gets graded.
+Keep any scratch files in this directory too, never in /tmp: other runs share it.
 
 ## Request
 

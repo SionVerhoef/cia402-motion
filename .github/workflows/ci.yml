@@ -34,6 +34,10 @@ jobs:
       - name: tests
         run: python -m unittest discover -s tests -v
 
+      # The eval grader must tell a good answer from a trapped one before it grades a run.
+      - name: eval grader self-test
+        run: python evals/selftest.py
+
       # The README promises Python 3.8. setup-python may no longer offer it; uv does.
       - uses: astral-sh/setup-uv@v5
       - name: tests, on Python 3.8

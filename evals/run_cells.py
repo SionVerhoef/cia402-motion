@@ -41,6 +41,7 @@ import concurrent.futures
 import io
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -162,6 +163,32 @@ def read_paths(name: str, inp: dict) -> list:
     return []
 
 
+def shell_paths(command: str, cell: Path) -> list:
+    """Paths a shell command names that may lie outside its cell.
+
+    Absolute paths other than the system's own; a lone segment such as /16 in 104//16, an
+    ST comment //T2 or grep "/fault" counts only under a real root. Paths under $HOME or ~.
+    Relative paths that climb with '..', from the last absolute directory the command cd'd
+    into: climbing two levels into with_skill/rep2 is how one cell reaches another.
+    """
+    out = []
+    for p in re.findall(r"(?<![\w.$)}/~:])(/[\w.-]+(?:/[^\s'\";|&)<>{}*]*)?)", command):
+        if re.match(r"/(dev|usr|bin|sbin|lib\w*|proc|etc)(/|$)", p):
+            continue
+        if p.strip("/").count("/") or re.match(r"/(tmp|home|projects|root|var|opt|mnt|srv)\b", p):
+            out.append(p)
+    if re.search(r"\$HOME\b|\$\{HOME\}|(?<![\w/.~])~(?=/|\s|$)", command):
+        out.append(str(Path.home()))
+    base = cell
+    for m in re.finditer(r"\bcd\s+(['\"]?)(\S+?)\1(?=[\s;&|)]|$)|(?<![\w./])((?:\.\./)+[^\s'\";|&)<>]*)",
+                         command):
+        if m.group(2):
+            base = base / m.group(2)            # an absolute target replaces base
+        else:
+            out.append(str(base / m.group(3)))
+    return out
+
+
 def report(run: Path, skill: Path) -> str:
     """Per-arm cost, plus an audit of what each cell actually touched."""
     snap = json.loads((skill / "SNAPSHOT.json").read_text())
@@ -196,6 +223,12 @@ def report(run: Path, skill: Path) -> str:
             if any(not within(cell, p, cell, skill)
                    for name, inp in calls for p in read_paths(name, inp)):
                 flags.append("READ-OUTSIDE-CELL")
+            # The smoke run of b03.5 had a cell work in a fixed /tmp folder, where two
+            # concurrent cells can delete each other's files.
+            if any(not within(cell, p, cell, skill)
+                   for name, inp in calls if name == "Bash"
+                   for p in shell_paths(inp.get("command", ""), cell)):
+                flags.append("SHELL-OUTSIDE-CELL")
         if any(name in ("Write", "Edit") and not within(cell, inp.get("file_path", ""), cell)
                for name, inp in calls):
             flags.append("WROTE-OUTSIDE-CELL")
