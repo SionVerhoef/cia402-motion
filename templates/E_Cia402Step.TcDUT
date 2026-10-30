@@ -17,6 +17,7 @@ TYPE E_Cia402Step :
     ResetEdge       := 41,  // T15: 0x0080
     ResetRelease    := 42,  // bit 7 low again, after every attempt
     ResetPause      := 43,  // before the next attempt
+    QuickStop       := 50,  // bQuickStop: 0x0002 held, then held down
     Error           := 90   // on the way down, waiting for bReset
 ) INT;
 END_TYPE

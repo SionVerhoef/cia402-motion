@@ -122,7 +122,6 @@ class SimDrive:
     def external_quick_stop(self):
         assert self.state == OE
         self._move('quick_stop_active', None)
-        self.ramp_left = self.qs_ramp
 
     def drop(self, state):
         self._move(state, None)
@@ -136,6 +135,8 @@ class SimDrive:
         if to != self.state:
             self.transitions.append((self.state, to, cw))
             self.state = to
+            if to == 'quick_stop_active':
+                self.ramp_left = self.qs_ramp
 
     def step(self, cw, mode_out, target, velocity, torque, enabled, valid):
         self.scan += 1
@@ -193,7 +194,8 @@ class SimDrive:
         if seen == 'quick_stop_active' and cw & 0x8F == 0x0F:
             self.violation(f'0x{cw:04X}: Enable operation in Quick stop active (T16)')
         if not enabled and cw & 0x8F == 0x0F:
-            self.violation(f'0x{cw:04X}: Enable operation sent while bEnable was FALSE')
+            self.violation(f'0x{cw:04X}: Enable operation sent with bEnable FALSE or '
+                           f'bQuickStop TRUE')
         if cw & 0x10 and self.display != 6 and not valid:
             self.violation(f'0x{cw:04X}: bit 4 sent in mode {self.display} before bValid')
 
@@ -226,7 +228,7 @@ class SimDrive:
         if new != OE:
             return
         if not enabled:
-            self.violation('Operation enabled entered while bEnable was FALSE')
+            self.violation('Operation enabled entered with bEnable FALSE or bQuickStop TRUE')
         if cw & MODE_BITS:
             self.violation(f'enabled with mode bits set: 0x{cw:04X}')
         self._setpoint_safe(self.display, target, velocity, torque, 'on enable')
@@ -295,7 +297,7 @@ class Rig:
         self.config = Struct(PROGRAM, 'ST_Cia402Config')
         for name, value in dict(FAST, **config).items():
             self.config[name] = value
-        self.enable, self.mode, self.reset = False, 0, False
+        self.enable, self.mode, self.reset, self.quick_stop = False, 0, False, False
         self.caller = None  # writes set-points after the call while bValid
         self.always = None  # writes before the call, valid or not
         self.history = []
@@ -314,14 +316,15 @@ class Rig:
         if self.always:
             self.always(self)
         self.out = self.fb.scan(self.now, bEnable=self.enable, nMode=self.mode,
-                                bReset=self.reset, stConfig=self.config, stDrive=self.io)
+                                bReset=self.reset, bQuickStop=self.quick_stop,
+                                stConfig=self.config, stDrive=self.io)
         if self.out['bValid'] and self.caller:
             self.caller(self)
         cw = self.io['nControlword']
         self.words.append(cw)
         d.step(cw, self.io['nModesOfOperation'], self.io['nTargetPosition'],
-               self.io['nTargetVelocity'], self.io['nTargetTorque'], self.enable,
-               self.out['bValid'])
+               self.io['nTargetVelocity'], self.io['nTargetTorque'],
+               self.enable and not self.quick_stop, self.out['bValid'])
         self.now += CYCLE
         return self.out
 
@@ -610,6 +613,211 @@ class QuickStop(TemplateCase):
         rig.enable, rig.mode = True, 8
         rig.valid()
         self.assertEqual(rig.drive.transitions[0], ('quick_stop_active', SOD, 0x0000))
+
+
+class CommandedQuickStop(TemplateCase):
+    """bQuickStop, wired as a line stop: bEnable := bRun, bQuickStop := NOT bLineOk."""
+
+    STAYS = {'bQuickStopStays': True}
+
+    def held_down(self, rig):
+        """The drive stays in Switch on disabled and the FB neither enables nor waits.
+        The first scans are left out: a late statusword can still show the state above."""
+        rig.run(30)
+        self.assertEqual(rig.drive.state, SOD)
+        self.assertFalse(rig.out['bBusy'])
+        self.assertFalse(rig.out['bValid'])
+        self.assertEqual(rig.words[-20:], [0x0000] * 20)
+
+    def test_t11_goes_out_at_once_and_is_held(self):
+        rig = self.running()
+        mark, start = len(rig.drive.transitions), len(rig.words)
+        rig.quick_stop = True
+        rig.scan()
+        self.assertFalse(rig.out['bValid'])
+        self.assertTrue(rig.out['bBusy'])
+        rig.at_rest()
+        self.assertEqual(set(rig.words[start:start + rig.drive.qs_ramp]), {0x0002})
+        self.assertEqual(rig.drive.transitions[mark:],
+                         plan_transitions(OE, 'quick_stop_active')
+                         + plan_transitions('quick_stop_active', SOD))
+        self.assertFalse(rig.out['bError'])
+        self.assertEqual(rig.out['nErrorID'], 0)
+
+    def test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again(self):
+        rig = self.running(mode=3)
+        rig.quick_stop = True   # bLineOk falls
+        rig.at_rest()
+        self.held_down(rig)
+        rig.quick_stop = False  # bLineOk back, bRun still TRUE
+        self.held_down(rig)
+        rig.enable = False      # bRun dropped...
+        rig.scan()
+        rig.enable = True       # ...and set again
+        rig.valid()
+
+    def test_enable_does_not_restart_while_the_stop_is_asked(self):
+        rig = self.running()
+        rig.quick_stop = True
+        rig.at_rest()
+        rig.enable = False
+        rig.run(3)
+        rig.enable = True
+        self.held_down(rig)
+
+    def test_a_pulse_runs_to_the_end(self):
+        rig = self.running()
+        rig.quick_stop = True
+        rig.scan()
+        rig.quick_stop = False
+        rig.at_rest()
+        self.held_down(rig)
+
+    def test_asked_at_rest_it_blocks_enabling(self):
+        rig = self.make()
+        rig.quick_stop = True
+        rig.run(3)
+        rig.enable, rig.mode = True, 8
+        self.held_down(rig)
+        rig.enable, rig.quick_stop = False, False
+        rig.scan()
+        rig.enable = True
+        rig.valid()
+
+    def test_a_ramp_longer_than_the_stop_timeout_is_no_error(self):
+        rig = self.running(qs_ramp=80)  # tStopTimeout is 50 scans here
+        rig.quick_stop = True
+        rig.at_rest()
+        self.assertFalse(rig.out['bError'])
+
+    def test_a_long_run_before_it_is_no_timeout(self):
+        # Running never re-arms the step timer, so it has long expired by the entry scan.
+        rig = self.running()
+        rig.run(100)
+        rig.quick_stop = True
+        rig.at_rest()
+        self.assertFalse(rig.out['bError'])
+
+    def test_on_a_drive_that_stays_it_leaves_at_standstill(self):
+        rig = self.running(quick_stop_stays=True, config=self.STAYS)
+        mark = len(rig.words)
+        rig.quick_stop = True
+        rig.at_rest()
+        self.assertGreaterEqual(rig.words.index(0x0000, mark) - mark,
+                                rig.drive.qs_ramp + 50 // CYCLE)
+        self.assertEqual(rig.drive.transitions[-1],
+                         plan_transitions('quick_stop_active', SOD, quick_stop_stays=True)[0])
+        self.held_down(rig)
+
+    def test_on_a_drive_that_stays_without_the_flag_it_is_held(self):
+        rig = self.running(quick_stop_stays=True)
+        rig.quick_stop = True
+        rig.run(100)
+        rig.quick_stop = False
+        rig.run(100)
+        self.assertEqual(rig.drive.state, 'quick_stop_active')
+        self.assertEqual(rig.words[-1], 0x0002)
+        self.assertFalse(rig.out['bError'])
+
+    def test_a_drive_that_refuses_t11_is_an_error_and_is_still_asked(self):
+        rig = self.running(refuse=('quick_stop_active',))
+        rig.quick_stop = True
+        rig.error(ERR['stop'])
+        rig.run(5)
+        self.assertEqual(rig.words[-1], 0x0002)
+
+    def test_in_an_error_an_enabled_drive_still_gets_t11(self):
+        rig = self.running()
+        rig.drive.refuse = ('switched_on',)
+        rig.enable = False
+        rig.error(ERR['stop'])
+        rig.quick_stop = True
+        rig.at_rest()
+        self.assertEqual(rig.drive.transitions[-2:],
+                         plan_transitions(OE, 'quick_stop_active')
+                         + plan_transitions('quick_stop_active', SOD))
+        self.assertEqual(rig.out['nErrorID'], ERR['stop'])
+
+    def test_fault_during_the_stop(self):
+        rig = self.running()
+        rig.quick_stop = True
+        rig.run(3)
+        rig.drive.fault()
+        rig.error(ERR['drive_fault'])
+        rig.run(10)
+        rig.pulse_reset()
+        rig.at_rest()
+        self.assertFalse(rig.out['bError'])
+        self.held_down(rig)
+
+    def test_bit_4_drops_in_the_middle_of_homing(self):
+        rig = self.make(homing_scans=10000)
+        rig.enable, rig.mode = True, 6
+        rig.until(lambda r: r.words[-1] == 0x001F, what='bit 4')
+        rig.quick_stop = True
+        rig.scan()
+        self.assertEqual(rig.words[-1], 0x0002)
+        rig.at_rest()
+
+    def test_in_the_middle_of_a_mode_switch(self):
+        rig = self.running(mode_delay=20)
+        rig.mode = 9
+        rig.run(3)
+        rig.quick_stop = True
+        rig.at_rest()
+        self.held_down(rig)
+
+    def test_restart_in_csp_does_not_jump(self):
+        # Moving with a following error; the ramp then moves the motor on by itself.
+        rig = self.running(position=0)
+        rig.caller = ramp(40)
+        rig.run(10)
+        rig.quick_stop = True
+        rig.at_rest()
+        rig.enable, rig.quick_stop, rig.caller = False, False, None
+        rig.scan()
+        rig.enable = True
+        rig.valid()
+        self.assertEqual(rig.io['nTargetPosition'], rig.drive.position)
+
+    def test_raised_at_every_scan_of_the_way_up(self):
+        # In Switched on with a T4 still on its way, 0x0000 would be T9.
+        for lag in (0, 1, 2):
+            for at in range(len(self.running(lag=lag).words) + 2):
+                with self.subTest(lag=lag, at=at):
+                    rig = self.make(lag=lag)
+                    rig.enable, rig.mode = True, 8
+                    rig.run(at)
+                    rig.quick_stop = True
+                    rig.at_rest()
+                    self.held_down(rig)
+
+    def test_raised_at_every_scan_of_the_way_down(self):
+        for lag in (0, 1, 2):
+            for at in range(6):
+                with self.subTest(lag=lag, at=at):
+                    rig = self.running(lag=lag)
+                    rig.enable = False
+                    rig.run(at)
+                    rig.quick_stop = True
+                    rig.at_rest()
+                    rig.enable = True
+                    self.held_down(rig)
+
+    def test_raised_at_every_scan_of_a_fault_reset(self):
+        # The reset runs to its end: bit 7 is never left high, and the stop then holds.
+        for lag in (0, 1, 2):
+            for at in range(10):
+                with self.subTest(lag=lag, at=at):
+                    rig = self.running(lag=lag)
+                    rig.drive.fault()
+                    rig.error(ERR['drive_fault'])
+                    rig.run(10)
+                    rig.pulse_reset()
+                    rig.run(at)
+                    rig.quick_stop = True
+                    rig.at_rest()
+                    self.held_down(rig)
 
 
 class FaultReset(TemplateCase):
@@ -1007,17 +1215,57 @@ BROKEN_RULES = {
         'stDrive.nControlword := 16#0000;   // let it finish',
         QuickStop, 'test_external_quick_stop_is_left_to_finish'),
     'quick stop left on a timer': (
-        'IF stConfig.bQuickStopStays AND fbStandstill.Q THEN',
-        'IF (stConfig.bQuickStopStays AND fbStandstill.Q) OR fbStepTimer.Q THEN',
+        'IF fbStandstill.Q THEN',
+        'IF fbStandstill.Q OR fbStepTimer.Q THEN',
         QuickStop, 'test_jitter_without_a_band_holds_the_quick_stop'),
     'quick stop left without bQuickStopStays': (
-        'IF stConfig.bQuickStopStays AND fbStandstill.Q THEN',
-        'IF fbStandstill.Q THEN',
+        'fbStandstill(IN := stConfig.bQuickStopStays\n',
+        'fbStandstill(IN := TRUE\n',
         QuickStop, 'test_quick_stop_is_not_cut_when_0x6064_is_not_copied'),
     'T16 out of a quick stop': (
         'stDrive.nControlword := 16#0002;   // let it finish',
         'stDrive.nControlword := 16#000F;   // let it finish',
         QuickStop, 'test_quick_stop_that_stays_is_left_at_standstill'),
+    'commanded quick stop left on a timer': (
+        '           OR fbStandstill.Q\n',
+        '           OR fbStandstill.Q OR fbStepTimer.Q\n',
+        CommandedQuickStop, 'test_a_ramp_longer_than_the_stop_timeout_is_no_error'),
+    'the ramp of a commanded quick stop timed out': (
+        '              AND (eDriveState <> E_Cia402State.QuickStopActive)\n        THEN',
+        '        THEN',
+        CommandedQuickStop, 'test_a_ramp_longer_than_the_stop_timeout_is_no_error'),
+    "the last step's timer taken for the quick stop's": (
+        '              AND (eStepPrev = E_Cia402Step.QuickStop)\n',
+        '',
+        CommandedQuickStop, 'test_a_long_run_before_it_is_no_timeout'),
+    'commanded quick stop sent as T5': (
+        'stDrive.nControlword := 16#0002;   // T11, held',
+        'stDrive.nControlword := 16#0007;   // T11, held',
+        CommandedQuickStop, 'test_t11_goes_out_at_once_and_is_held'),
+    'T9 to a T4 still on its way': (
+        '           OR fbStandstill.Q\n',
+        '           OR fbStandstill.Q OR (eDriveState = E_Cia402State.SwitchedOn)\n',
+        CommandedQuickStop, 'test_raised_at_every_scan_of_the_way_up'),
+    'quick stop taken only from Running': (
+        'ELSIF bQuickStop AND NOT bResetting THEN',
+        'ELSIF bQuickStop AND (eStep = E_Cia402Step.Running) THEN',
+        CommandedQuickStop, 'test_raised_at_every_scan_of_the_way_up'),
+    'fault reset cut off by a quick stop': (
+        'ELSIF bQuickStop AND NOT bResetting THEN',
+        'ELSIF bQuickStop THEN',
+        CommandedQuickStop, 'test_raised_at_every_scan_of_a_fault_reset'),
+    'restarted by the end of the quick stop': (
+        'IF NOT bQuickStop AND NOT bEnable THEN',
+        'IF NOT bQuickStop THEN',
+        CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
+    'busy while held down': (
+        '          AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop))\n',
+        '          AND (bEnable\n',
+        CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
+    'quick stop not sent to an enabled drive in Error': (
+        '                IF bQuickStop THEN\n',
+        '                IF FALSE THEN\n',
+        CommandedQuickStop, 'test_in_an_error_an_enabled_drive_still_gets_t11'),
     'T9 from Operation enabled': (
         'stDrive.nControlword := 16#0007;   // T5, stops as 0x605C',
         'stDrive.nControlword := 16#0000;   // T5, stops as 0x605C',

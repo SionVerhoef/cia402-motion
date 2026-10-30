@@ -2,10 +2,12 @@
 
 `FB_Cia402Axis` is a PLC function block for one CiA 402 drive. It brings the drive through its
 state machine into Operation enabled in the mode you ask for, homes it, switches modes, takes
-it down again, and resets faults, keeping to the rules in `../references/state-machine.md`.
+it down again, with a quick stop if you ask for one, and resets faults, keeping to the rules in
+`../references/state-machine.md`.
 
-> **Status: reviewed, not run on a drive.** twincat-st's `st_review.py` reports no findings,
-> and `tests/test_templates.py` runs the FB's own text against a simulated drive. It has never
+> **Status: reviewed, not run on a drive.** twincat-st's `st_review.py` reports no high
+> findings and one medium (CP23: 11 pins, where PLCopen suggests about 10), and
+> `tests/test_templates.py` runs the FB's own text against a simulated drive. It has never
 > been compiled in TwinCAT or CODESYS, and it has never driven a real drive. Test it with
 > reduced torque and speed limits before anyone stands near the machine. It is not a safety
 > function: STO, SS1 and safe stops belong in a safety controller
@@ -50,6 +52,7 @@ changed.
 | `bEnable` | BOOL in | TRUE: Operation enabled in `nMode`. FALSE: stop with T5 (0x605C decides how), then T10 |
 | `nMode` | SINT in | The 0x6060 code. 6 means home: `bValid` then says homed. Change it at standstill |
 | `bReset` | BOOL in | Rising edge: clear the error; from Fault, run the reset first |
+| `bQuickStop` | BOOL in | TRUE: quick stop, 0x0002 held, over `bEnable`. See *Quick stop*. Not a safety function |
 | `stConfig` | `ST_Cia402Config` in | The defaults are in the type. Not checked: a zero timeout times out at once |
 | `bValid` | BOOL out | Enabled in `nMode`: the set-points in `stDrive` are yours |
 | `bBusy` | BOOL out | On the way to what `bEnable` asks |
@@ -76,11 +79,11 @@ FALSE: watch `eDriveState`.
 |---|---|
 | 16#8101–16#8104 | The drive did not take T1, T2, T3 or T4 in `tStateTimeout` |
 | 16#8105 | 0x6061 never showed `nMode`: the drive may not have the mode (0x6502) |
-| 16#8106 | A step of the way down did not end in `tStopTimeout` |
+| 16#8106 | A step of the way down did not end in `tStopTimeout`; for `bQuickStop`, the drive did not take 0x0002 |
 | 16#8107 | Homing did not end in `tHomingTimeout` |
 | 16#8110 | The drive is in Fault: read 0x603F |
 | 16#8111 | Still in Fault after `nResetAttempts` resets: the cause is still there |
-| 16#8112 | Quick stop active, not asked for by the FB |
+| 16#8112 | Quick stop active, not asked for with `bQuickStop` |
 | 16#8113 | The drive moved where the FB did not ask: out of the state it was holding, during a mode switch, or out of a reset |
 | 16#8114 | Homing error, statusword bit 13 |
 | 16#8115 | The statusword matches no state and its fault bit is 0, or reads Not ready after the drive had left it (inputs that are not the drive's) |
@@ -88,13 +91,30 @@ FALSE: watch `eDriveState`.
 
 ## Quick stop
 
-The FB never asks for a quick stop; a drive can still go into one, from its own input or
-another source. The FB then holds 0x0002 and waits for the stop to end. With 0x605A 0–4 the
-drive leaves by itself (T12). With 0x605A 5–8 it stays in Quick stop active at standstill: set
-`stConfig.bQuickStopStays`, and `nStandstillWindow` to the position jitter at standstill, and
-the FB sends T12 once 0x6064 has stayed inside the band for `tStandstill`. Without the flag the
-FB waits for ever, and stays busy: safe, but stuck. The flag needs 0x6064 copied in, and a
-`tStandstill` longer than the drive's position update period.
+**Asking for one.** `bQuickStop` TRUE sends 0x0002 on the same scan and holds it, over
+`bEnable`, from every step but Error and a fault reset that has begun, which runs to its end
+first. In Operation enabled that is T11, and 0x605A decides how the motor stops: the FB does not
+write it, and what a drive offers differs by vendor (`../references/state-machine.md`). From
+Ready to switch on or Switched on the drive goes straight to Switch on disabled, and a T4 still
+on its way meets T11, never T9. `bValid` falls at once. It is not an error: `bError` stays
+FALSE. If the drive does not take the word in `tStopTimeout`, that is 16#8106. In Error, with
+the drive still in Operation enabled, 0x0002 replaces T5 while `bQuickStop` is TRUE.
+
+`bQuickStop` falling does not end the stop, and the FB never sends T16. The drive ends in Switch
+on disabled and stays there, with `bValid` and `bBusy` FALSE, until `bQuickStop` and `bEnable`
+are both FALSE; a new `bEnable` then enables it. For a line stop, `bEnable := bRun` and
+`bQuickStop := NOT bLineOk`: the line coming back restarts nothing, `bRun` has to fall and rise.
+
+Not a safety function: `../references/safety-boundary.md`. To pause an axis and carry on, use
+halt, bit 8 of `nModeBits`. A quick stop ends with the drive switched off.
+
+**How it ends.** The same for a quick stop you asked for and one the drive went into itself,
+from its own input or another source (that one is 16#8112). The FB holds 0x0002 and waits for
+the stop to end. With 0x605A 0–4 the drive leaves by itself (T12). With 0x605A 5–8 it stays in
+Quick stop active at standstill: set `stConfig.bQuickStopStays`, and `nStandstillWindow` to the
+position jitter at standstill, and the FB sends T12 once 0x6064 has stayed inside the band for
+`tStandstill`. Without the flag the FB waits for ever, and stays busy: safe, but stuck. The flag
+needs 0x6064 copied in, and a `tStandstill` longer than the drive's position update period.
 
 ## Wiring it, in TwinCAT
 
@@ -106,6 +126,7 @@ VAR
     fbValidRise1  : R_TRIG;
     bAxis1On      : BOOL;    // from the application
     bAcknowledge  : BOOL;    // from the HMI
+    bLineStop     : BOOL;    // from the application; not a safety input
     nTrajectory1  : DINT;    // your CSP set-point generator's output
     nStatus1   AT %I* : UINT;   // link: 0x6041
     nDisplay1  AT %I* : SINT;   // 0x6061
@@ -118,7 +139,7 @@ END_VAR
 stAxis1.nStatusword     := UINT_TO_WORD(nStatus1);
 stAxis1.nModesDisplay   := nDisplay1;
 stAxis1.nPositionActual := nActual1;
-fbAxis1(bEnable := bAxis1On, nMode := 8, bReset := bAcknowledge,
+fbAxis1(bEnable := bAxis1On, nMode := 8, bReset := bAcknowledge, bQuickStop := bLineStop,
         stConfig := stConfig1, stDrive := stAxis1);
 fbValidRise1(CLK := fbAxis1.bValid);
 IF fbValidRise1.Q THEN
@@ -203,7 +224,8 @@ violation when the FB:
 
 - sends T9, T16, or bit 7 to a drive it has not seen in Fault, or bit 7 with the enable bits;
 - cuts a quick stop short;
-- sends Enable operation after `bEnable` fell, or bit 4 outside homing before `bValid`;
+- sends Enable operation after `bEnable` fell or with `bQuickStop` TRUE, or bit 4 outside
+  homing before `bValid`;
 - enables (T4) or switches mode with an unsafe set-point, or writes 0x6060 before the new
   mode's set-point was safe;
 - steps a set-point the enabled drive is following.
@@ -213,6 +235,9 @@ compared with `cia402.py plan`. They also cover:
 
 - `bEnable` dropped at every scan of the way up, and raised again at every scan of the way down;
 - quick stops that end by themselves, ones that stay, and one without 0x6064;
+- quick stops asked for: a pulse, a ramp longer than `tStopTimeout`, a drive that refuses T11,
+  a fault during the stop, and `bQuickStop` raised at every scan of the way up, of the way down
+  and of a fault reset;
 - fault resets that work, ones that fail three times, a level `bReset`, and an acknowledge
   given in Fault reaction active;
 - mode switches, including during T4 and in the middle of homing;
