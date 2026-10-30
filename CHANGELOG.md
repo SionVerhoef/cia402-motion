@@ -5,10 +5,13 @@
 **Templates**
 
 - `FB_Cia402Axis`: a `bQuickStop` input and a `QuickStop` step, so that a process stop no longer
-  needs the template changed. 0x0002 goes out on the same scan and is held, from every step but
-  Error and a fault reset that has begun. The drive leaves Quick stop active as it does after a
-  quick stop of its own, never on a timer, and stays down until `bQuickStop` and `bEnable` are
-  both FALSE, so that nothing restarts it but a new `bEnable`. Not a safety function.
+  needs the template changed. 0x0002 goes out on the same scan and is held, and one scan of the
+  input is enough; only a fault reset that has begun ends first. The drive leaves Quick stop
+  active as it does after a quick stop of its own, never on a timer, and stays down, through an
+  error or a fault reset too, until it is there with `bQuickStop` and `bEnable` both FALSE, so
+  that nothing restarts it but a new `bEnable`. Not a safety function.
+- A drive that does not take 0x0002 in `tStateTimeout` is 16#8108, and the FB goes on with T5:
+  asking for a stop never leaves an axis harder to stop.
 - The FB now has 11 pins: twincat-st's reviewer reports CP23 (medium), over PLCopen's suggested
   10. Kept: a stop command belongs on a pin, not inside the process-data struct.
 
