@@ -345,7 +345,7 @@ class Planner(unittest.TestCase):
                         self.assertFalse(writes[i + 1]['controlword'] & 0x80)
 
     def test_t7_and_t10_note_the_late_statusword(self):
-        # The word stays 0x0000: right for a caller with no late statusword. The note
+        # The word stays 0x0000: right for a caller with no bit 3 left to land. The note
         # carries the race, so that code written from the plan does not lose it.
         rule = 'rule 9'
         for start in ('operation_enabled', 'switched_on', 'ready_to_switch_on'):

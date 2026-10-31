@@ -19,7 +19,7 @@
   now leaves Switched on and Ready to switch on with 0x0002 while 0x000F may still come: the
   same transition there and T11, not T9, if the drive has climbed back, and 0x605A then decides
   how the motor stops. `cia402.py plan` still says 0x0000, which is right for a caller with no
-  late statusword.
+  word with bit 3 in the drive or on its way.
 - Once its words have been without bit 3 for `tStateTimeout` the FB sends 0x0000. A drive that
   ignores controlword bit 2 therefore still gets down, but a way down waits that long.
 - A way down can now end in Quick stop active: on a drive with 0x605A 5–8, set `bQuickStopStays`
@@ -31,8 +31,8 @@
   while a 0x000F may still land, with what it costs. Labelled as this skill's recommendation,
   not the profile's. The code eval's expected text follows, and a plain 0x0000 there is not a
   fail.
-- `cia402.py plan` keeps 0x0000 for T7 and T10, right for a caller with no late statusword, and
-  adds a note pointing to rule 9.
+- `cia402.py plan` keeps 0x0000 for T7 and T10, right for a caller with no word with bit 3 in the
+  drive or on its way, and adds a note pointing to rule 9.
 
 ## 0.1.0 — 2026-10-29
 

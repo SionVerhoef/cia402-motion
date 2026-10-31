@@ -168,12 +168,16 @@ correctly in prose. Rule 9 came from this skill's own template.
    would. With 0x605A = 5–8 any way down can end in Quick stop active, so it needs the exit of
    rule 4 even if you never ask for a quick stop. A drive that ignores bit 2 reads 0x0002 as
    Shutdown, so it needs the 0x0000 above, and waits in Ready to switch on until then; one that
-   climbed back takes T8 (0x605B). Beckhoff's EL72x1 in DS402 reserves bit 2 and what it does
-   with it is not documented (`vendors/beckhoff.md`): try it. A master that sends its next word
-   only after a fresh statusword has no race, and 0x0000 is right there. `FB_Cia402Axis` keeps
-   this rule, with `tStateTimeout` as the time: `templates/README.md`, *Quick stop*.
+   climbed back takes T8 (0x605B). Beckhoff's EL72x1 in DS402 reserves bit 2 and has no 0x605A,
+   and LinMot's C125x-MI has no 0x605A: their vendor pages do not say what 0x0002 does there, so
+   try it.
+
+   The race needs a word with bit 3 in the drive or on its way. A fresh statusword is not enough:
+   a 0x000F left standing in 0x6040 still lifts a drive that dropped out. With no such word
+   0x0000 is right. `FB_Cia402Axis` keeps this rule, with `tStateTimeout` as the time:
+   `../templates/README.md`, *Quick stop*.
 
 `cia402.py plan` follows the first eight and notes rule 9 where its path has T7 or T10. It keeps
-0x0000 there, for a caller with no late statusword. `cia402.py decode cw <word>` names the
-command a word actually sends, which catches 0x000B (quick stop, because bit 2 is 0) and 0x008F
-(bit 7 with the enable bits).
+0x0000 there, for a caller with no word with bit 3 left to land. `cia402.py decode cw <word>`
+names the command a word actually sends, which catches 0x000B (quick stop, because bit 2 is 0)
+and 0x008F (bit 7 with the enable bits).
