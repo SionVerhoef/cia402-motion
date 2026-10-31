@@ -21,8 +21,9 @@
   how the motor stops. `cia402.py plan` still says 0x0000, which is right for a caller with no
   late statusword.
 - Once its words have been without bit 3 for `tStateTimeout` the FB sends 0x0000. A drive that
-  ignores controlword bit 2 therefore still gets down, but a way down from Operation enabled
-  waits that long.
+  ignores controlword bit 2 therefore still gets down, but a way down waits that long.
+- A way down can now end in Quick stop active: on a drive with 0x605A 5–8, set `bQuickStopStays`
+  even if `bQuickStop` is never used.
 
 ## 0.1.0 — 2026-10-29
 

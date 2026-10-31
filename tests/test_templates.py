@@ -406,8 +406,8 @@ def way_down_transitions(start):
     """plan_transitions to Switch on disabled, with the word the FB sends for T7 and T10 while
     0x000F may still be on its way: 0x0002, which is T11 and not T9 if the drive has climbed
     back unseen. The plan's 0x0000 is right for a caller with no late statusword."""
-    return [(a, b, 0x0002 if cw == 0x0000 and a in ('ready_to_switch_on', 'switched_on')
-             else cw) for a, b, cw in plan_transitions(start, SOD)]
+    return [(a, b, 0x0002 if a in ('ready_to_switch_on', 'switched_on') else cw)
+            for a, b, cw in plan_transitions(start, SOD)]
 
 
 class TemplateCase(unittest.TestCase):
@@ -1231,22 +1231,71 @@ class Latency(TemplateCase):
 class StaleWordOnTheWayDown(TemplateCase):
     """The drive drops out while 0x000F is still going out, so that it is back in Operation
     enabled when a late statusword shows the state it dropped to. Every word sent there has
-    to be safe in both states."""
+    to be safe in both states. Each drop comes soon after the last change of word and again
+    after more than tStateTimeout of holding it: it is the holding that counts, not when
+    0x000F first went out."""
 
     LAGS = (0, 1, 2, 3)
+    HELD = 30  # scans, over tStateTimeout
 
     def goes_down(self, rig):
+        mark = len(rig.words)
         rig.error(ERR['left_state'])
         rig.run(30)
         self.assertEqual(rig.drive.state, SOD)
         self.assertEqual(rig.words[-1], 0x0000)
+        down = rig.distinct_words(mark)
+        if 0x0002 in down:  # once T11 is out, no T5 on top of it
+            self.assertNotIn(0x0007, down[down.index(0x0002):])
 
     def test_drop_to_switched_on_while_running(self):
-        for lag in self.LAGS:
-            with self.subTest(lag=lag):
+        for lag, held in product(self.LAGS, (0, self.HELD)):
+            with self.subTest(lag=lag, held=held):
                 rig = self.running(lag=lag)
+                rig.run(held)
                 rig.drive.drop('switched_on')
                 self.goes_down(rig)
+
+    def test_drop_with_a_mode_bit_held(self):
+        # The word is 0x010F then, halt: it is bit 3 that may still land, not one word.
+        for lag in self.LAGS:
+            with self.subTest(lag=lag):
+                rig = self.running(lag=lag, mode=9)
+                rig.io['nModeBits'] = 0x0100
+                rig.caller = lambda r: r.io.__setitem__('nModeBits', 0x0100)
+                rig.run(self.HELD)
+                rig.drive.drop('switched_on')
+                self.goes_down(rig)
+
+    def test_a_refused_t11_after_the_drop_falls_back_to_t5(self):
+        for lag in self.LAGS:
+            with self.subTest(lag=lag):
+                rig = self.running(lag=lag, refuse=('quick_stop_active',))
+                rig.drive.drop('switched_on')
+                rig.error(ERR['left_state'])
+                rig.until(lambda r: r.drive.state == SOD, what='way down')
+
+    def test_a_drive_that_stays_in_quick_stop_active(self):
+        # bEnable falls with the drop still unseen: no error, and a T11 on a drive with
+        # 0x605A 5-8 needs bQuickStopStays, bQuickStop or not.
+        for lag in (1, 2, 3):
+            with self.subTest(lag=lag, flag=True):
+                rig = self.running(lag=lag, quick_stop_stays=True,
+                                   config={'bQuickStopStays': True})
+                rig.drive.drop('switched_on')
+                rig.run(lag)
+                rig.enable = False
+                rig.at_rest()
+            with self.subTest(lag=lag, flag=False):
+                rig = self.running(lag=lag, quick_stop_stays=True)
+                rig.drive.drop('switched_on')
+                rig.run(lag)
+                rig.enable = False
+                rig.run(200)
+                self.assertEqual(rig.drive.state, 'quick_stop_active')
+                self.assertEqual(rig.words[-1], 0x0002)
+                self.assertTrue(rig.out['bBusy'])
+                self.assertFalse(rig.out['bError'])
 
     def test_drop_to_ready_to_switch_on_while_running(self):
         for lag in self.LAGS:
@@ -1256,12 +1305,12 @@ class StaleWordOnTheWayDown(TemplateCase):
                 self.goes_down(rig)
 
     def test_drop_during_homing(self):
-        for lag in self.LAGS:
-            with self.subTest(lag=lag):
+        for lag, held in product(self.LAGS, (0, self.HELD)):
+            with self.subTest(lag=lag, held=held):
                 rig = self.make(lag=lag, homing_scans=10000)
                 rig.enable, rig.mode = True, 6
                 rig.until(lambda r: r.words[-1] == 0x001F, what='bit 4')
-                rig.run(lag + 2)
+                rig.run(lag + 2 + held)
                 rig.drive.drop('switched_on')
                 self.goes_down(rig)
 
@@ -1295,7 +1344,7 @@ class NoBit2(TemplateCase):
     """A drive with no quick stop that reads controlword bit 2 as 1, so that 0x0002 is
     Shutdown: the way down must still end. What a real one does with the bit is not known."""
 
-    LAGS = (0, 1, 2, 3)
+    LAGS = StaleWordOnTheWayDown.LAGS
 
     def test_way_down_from_each_state(self):
         for lag, start in product(self.LAGS, (OE, 'switched_on', 'ready_to_switch_on')):
@@ -1499,14 +1548,12 @@ BROKEN_RULES = {
         '          AND (bEnable OR NOT bAtRest);',
         CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
     'quick stop not sent to an enabled drive in Error': (
-        'E_Cia402State.OperationEnabled:\n'
-        '                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
-        'E_Cia402State.OperationEnabled:\n                IF FALSE THEN',
+        '                IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
+        '                IF FALSE\n',
         CommandedQuickStop, 'test_in_an_error_an_enabled_drive_still_gets_t11'),
     'no way back to T5 from a refused T11': (
-        'E_Cia402State.OperationEnabled:\n'
-        '                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
-        'E_Cia402State.OperationEnabled:\n                IF bQuickStopHeld THEN',
+        '                IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
+        '                IF bQuickStopHeld\n',
         CommandedQuickStop, 'test_a_drive_that_refuses_t11_is_taken_down_with_t5'),
     'T5 for a quick stop asked with an undecodable statusword': (
         'it cannot cut power.\n                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
@@ -1637,6 +1684,19 @@ BROKEN_RULES = {
         '                IF FALSE THEN\n'
         '                    stDrive.nControlword := 16#0000;',
         NoBit2, 'test_way_down_from_each_state'),
+    'the time since 0x000F never re-armed': (
+        'fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,',
+        'fbEnableWordOff(IN := TRUE,',
+        StaleWordOnTheWayDown, 'test_drop_to_switched_on_while_running'),
+    'only the word 0x000F counted as an enable word': (
+        'fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,',
+        'fbEnableWordOff(IN := stDrive.nControlword <> 16#000F,',
+        StaleWordOnTheWayDown, 'test_drop_during_homing'),
+    'T5 on top of a T11 that the late statusword has not shown': (
+        '                   OR ((stDrive.nControlword = 16#0002)\n'
+        '                       AND NOT fbEnableWordOff.Q)\n',
+        '',
+        StaleWordOnTheWayDown, 'test_drop_to_switched_on_while_running'),
     "0x0002's way out re-armed by the state the drive shows": (
         'fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,',
         'fbEnableWordOff(IN := ((stDrive.nControlword AND 16#0008) = 0) AND NOT bAtRest,',

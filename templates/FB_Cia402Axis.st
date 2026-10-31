@@ -134,9 +134,9 @@ FUNCTION_BLOCK FB_Cia402Axis
     - Quick stop active is left only when the drive leaves it itself, or,
       where 0x605A keeps it there, at standstill. Never on a timer: that
       state is the stop ramp, and 0x0000 during it lets the motor coast.
-    - On the way down, never Operation enabled and never T9. The statusword
-      is late, so a 0x000F already sent can have put the drive back in
-      Operation enabled while the FB still sees Switched on. T10 and T7 go
+    - On the way down, it never commands Operation enabled and never T9.
+      The statusword is late, so a 0x000F already sent can have put the
+      drive back there while the FB still sees Switched on. T10 and T7 go
       out as 0x0002, which is T11 there and not T9: 0x605A then decides how
       the motor stops, not 0x605C. Once bit 3 has been off for
       tStateTimeout no 0x000F can still come, and they go out as 0x0000,
@@ -149,7 +149,8 @@ FUNCTION_BLOCK FB_Cia402Axis
       it.
 
     CHECK ON YOUR DRIVE (the skill's references/vendors/)
-    - 0x605A 5-8 keeps the drive in Quick stop active at standstill. Set
+    - 0x605A 5-8 keeps the drive in Quick stop active at standstill, and
+      any way down can end there, even with bQuickStop never used. Set
       stConfig.bQuickStopStays, and nStandstillWindow to the position
       jitter at standstill: the FB then leaves with T12 once the position
       has stayed in the band for tStandstill. Without the flag it waits
@@ -160,8 +161,8 @@ FUNCTION_BLOCK FB_Cia402Axis
     - Beckhoff's EL72x1 in DS402 has no quick stop: controlword bit 2 is
       reserved there. LinMot's C125x-MI has no 0x605A. Try bQuickStop on
       such a drive before relying on it. If it ignores bit 2, a way down
-      from Operation enabled also waits in Ready to switch on until bit 3
-      has been off for tStateTimeout.
+      also waits in Ready to switch on until bit 3 has been off for
+      tStateTimeout.
     - Statusword bit 12 in CSP is not checked: drives differ on it.
     - A homing result counts only after the drive has shown a phase with
       bits 12 and 13 both 0, from the scan bit 4 goes out on, so that an
@@ -483,9 +484,9 @@ CASE eStep OF
         END_IF
 
     E_Cia402Step.AbortEnable:
-        // 0x000F may still be on its way, and 0x0000 would then be T9.
-        // 0x0007 is T5 in Operation enabled and nothing in Switched on;
-        // after tStateTimeout in Switched on no T4 can still come.
+        // 0x000F may still be on its way, and bEnable FALSE stops with T5,
+        // not T11. 0x0007 is T5 in Operation enabled and nothing in
+        // Switched on; after tStateTimeout there no T4 can still come.
         IF (eDriveState <> E_Cia402State.SwitchedOn) OR fbStepTimer.Q THEN
             eStep := E_Cia402Step.Disabled;
         END_IF
@@ -611,7 +612,13 @@ CASE eStep OF
         // <state> sod, with 0x0002 for T7, T10 while 0x000F may still come.
         CASE eDriveState OF
             E_Cia402State.OperationEnabled:
-                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN
+                // 0x0002 sent below may have gone out after a statusword
+                // that is only now showing the climb: hold it, one command
+                // at a time, until no 0x000F can still come.
+                IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)
+                   OR ((stDrive.nControlword = 16#0002)
+                       AND NOT fbEnableWordOff.Q)
+                THEN
                     stDrive.nControlword := 16#0002;   // T11, in Error
                 ELSE
                     stDrive.nControlword := 16#0007;   // T5, stops as 0x605C
@@ -626,8 +633,8 @@ CASE eStep OF
                 // T10, T7. 0x0002 leaves these two as 0x0000 does, but a late
                 // statusword may hide a 0x000F that has put the drive back
                 // in Operation enabled: there it is T11, and 0x0000 is T9.
-                // A drive with no bit 2 reads it as Shutdown and stays. Bit 3
-                // off for tStateTimeout: no 0x000F can still come.
+                // A drive may ignore bit 2 and read it as Shutdown. Once bit
+                // 3 has been off for tStateTimeout no 0x000F can still come.
                 IF fbEnableWordOff.Q THEN
                     stDrive.nControlword := 16#0000;
                 ELSE

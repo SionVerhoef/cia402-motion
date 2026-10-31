@@ -124,13 +124,15 @@ switch on with 0x0002 where `cia402.py plan` says 0x0000. From those two states 
 Switch on disabled, on the same scan.
 They differ on a drive that dropped out by itself while 0x000F was still going out: it is back in
 Operation enabled by the time a late statusword shows the drop, and there 0x0000 is T9 and 0x0002
-is T11. The motor then stops as 0x605A says, not 0x605C, and with 0x605A 5–8 the stop ends as
-below. The plan's 0x0000 is right for a caller with no late statusword.
+is T11. The motor then stops as 0x605A says, not 0x605C. With 0x605A 5–8 the stop ends as below,
+so `bQuickStopStays` matters even if you never use `bQuickStop`: without it the FB holds 0x0002 for
+ever, and if `bEnable` fell first it does so with `bBusy` TRUE and no error. The plan's 0x0000 is
+right for a caller with no late statusword.
 
 Once its own words have been without bit 3 for `tStateTimeout`, no 0x000F can still come, and the
 FB sends 0x0000, for a drive with no quick stop. If such a drive ignores bit 2, 0x0002 reads as
-Shutdown: a way down from Operation enabled then waits in Ready to switch on until that time is
-up, before T7, and a drive that climbed back takes T8 (0x605B). Whether a real one ignores the bit
+Shutdown: a way down then waits in Ready to switch on until that time is up, before T7, and a
+drive that climbed back takes T8 (0x605B). Whether a real one ignores the bit
 is not in the vendor pages: try it.
 
 **How it ends.** The same for a quick stop you asked for and one the drive went into itself,
