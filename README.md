@@ -115,7 +115,7 @@ on this page.
 - **`FB_Cia402Axis` passes twincat-st's reviewer**, `--pedantic` included, with one medium
   finding (CP23: 11 pins, where PLCopen suggests about 10), and its file check.
   Its own Structured Text runs against a simulated drive whose statusword arrives up to three
-  cycles late, every scan checked against the state-machine rules. Each of 46 rules broken on
+  cycles late, every scan checked against the state-machine rules. Each of 53 rules broken on
   purpose makes the scenario named for it fail.
 - **The tests pass on Linux and Windows, and on Python 3.8.**
 - **Agent behaviour in A/B evals** on Opus 5.5 and Haiku 5.5, and the safety refusal on Haiku

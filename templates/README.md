@@ -119,6 +119,22 @@ and rise.
 Not a safety function: `../references/safety-boundary.md`. To pause an axis and carry on, use
 halt, bit 8 of `nModeBits`. A quick stop ends with the drive switched off.
 
+**On the way down.** While 0x000F may still be on its way, the FB leaves Switched on and Ready to
+switch on with 0x0002 where `cia402.py plan` says 0x0000. From those two states both words go to
+Switch on disabled, on the same scan.
+They differ on a drive that dropped out by itself while 0x000F was still going out: it is back in
+Operation enabled by the time a late statusword shows the drop, and there 0x0000 is T9 and 0x0002
+is T11. The motor then stops as 0x605A says, not 0x605C. With 0x605A 5–8 the stop ends as below,
+so `bQuickStopStays` matters even if you never use `bQuickStop`: without it the FB holds 0x0002 for
+ever, and if `bEnable` fell first it does so with `bBusy` TRUE and no error. The plan's 0x0000 is
+right for a caller with no late statusword.
+
+Once its own words have been without bit 3 for `tStateTimeout`, no 0x000F can still come, and the
+FB sends 0x0000, for a drive with no quick stop. If such a drive ignores bit 2, 0x0002 reads as
+Shutdown: a way down then waits in Ready to switch on until that time is up, before T7, and a
+drive that climbed back takes T8 (0x605B). Whether a real one ignores the bit
+is not in the vendor pages: try it.
+
 **How it ends.** The same for a quick stop you asked for and one the drive went into itself,
 from its own input or another source (that one is 16#8112). The FB holds 0x0002 and waits for
 the stop to end. With 0x605A 0–4 the drive leaves by itself (T12). With 0x605A 5–8 it stays in
@@ -222,6 +238,9 @@ write 0x6060 by SDO for every mode switch and copy 0x6061, read by SDO, into
 - **A state the drive has just entered by itself.** Until the statusword shows it, the FB keeps
   sending the word for the state it last saw: bit 7 for a cycle or two after a fault reset
   succeeded, 0x000F for a cycle or two after the drive went into Quick stop active on its own.
+  A drive that drops to Switched on takes that word as T4 and climbs back to Operation enabled,
+  with whatever else the word holds: bit 4 in homing, the caller's bits and set-points once
+  `bValid`. The FB stops it when the statusword shows the drop, but cannot prevent the climb.
 - **What a particular drive does.** The vendor list in the FB's header comment is what to check
   on yours.
 
@@ -242,9 +261,11 @@ violation when the FB:
 - steps a set-point the enabled drive is following.
 
 The scenarios cover enabling from every state and the way down from every state, both
-compared with `cia402.py plan`. They also cover:
+compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. They also cover:
 
 - `bEnable` dropped at every scan of the way up, and raised again at every scan of the way down;
+- a drive that drops out while 0x000F or 0x001F is going out, running, homing or in a mode
+  switch, and a drive that ignores controlword bit 2;
 - quick stops that end by themselves, ones that stay, and one without 0x6064;
 - quick stops asked for: a ramp longer than `tStopTimeout`, a drive that refuses T11, a fault
   or a bad statusword during the stop and while held down, and `bQuickStop`, held and as a
