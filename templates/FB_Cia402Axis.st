@@ -100,9 +100,10 @@ FUNCTION_BLOCK FB_Cia402Axis
                     speeds, by SDO first). bValid then means homed. To
                     home again, drop bEnable or ask for another mode.
                     Change nMode at standstill only.
-    bEnable FALSE   Stop and switch off as cia402.py plan <state> sod
-                    does: Disable operation (T5: 0x605C decides how the
-                    motor stops), then Disable voltage (T10).
+    bEnable FALSE   Stop and switch off: Disable operation (T5: 0x605C
+                    decides how the motor stops), then T10. The same states
+                    as cia402.py plan <state> sod, but T10 and T7 can go
+                    out as 0x0002: see WHAT IT KEEPS TO.
     bReset          Rising edge: clear the error. If the drive is in
                     Fault, reset it first: bit 7 low, high, low.
     bQuickStop      TRUE: quick stop, from any step and over bEnable:
@@ -133,7 +134,13 @@ FUNCTION_BLOCK FB_Cia402Axis
     - Quick stop active is left only when the drive leaves it itself, or,
       where 0x605A keeps it there, at standstill. Never on a timer: that
       state is the stop ramp, and 0x0000 during it lets the motor coast.
-    - On the way down, never Operation enabled and never T9.
+    - On the way down, never Operation enabled and never T9. The statusword
+      is late, so a 0x000F already sent can have put the drive back in
+      Operation enabled while the FB still sees Switched on. T10 and T7 go
+      out as 0x0002, which is T11 there and not T9: 0x605A then decides how
+      the motor stops, not 0x605C. Once bit 3 has been off for
+      tStateTimeout no 0x000F can still come, and they go out as 0x0000,
+      for a drive that does not take 0x0002.
     - Before T4 the set-points cannot move the motor: 0x607A = 0x6064,
       0x60FF = 0, 0x6071 = 0, bits 4-6, 8, 9 = 0. While the drive is
       enabled and they are not the caller's, the FB leaves them as they
@@ -152,7 +159,9 @@ FUNCTION_BLOCK FB_Cia402Axis
       FB stops with 16#8115 after T2.
     - Beckhoff's EL72x1 in DS402 has no quick stop: controlword bit 2 is
       reserved there. LinMot's C125x-MI has no 0x605A. Try bQuickStop on
-      such a drive before relying on it.
+      such a drive before relying on it. If it ignores bit 2, a way down
+      from Operation enabled also waits in Ready to switch on until bit 3
+      has been off for tStateTimeout.
     - Statusword bit 12 in CSP is not checked: drives differ on it.
     - A homing result counts only after the drive has shown a phase with
       bits 12 and 13 both 0, from the scan bit 4 goes out on, so that an
@@ -184,6 +193,7 @@ VAR
     fbStepTimer      : TON;       // the timeout of the step it is in
     fbStandstill     : TON;
     fbQuickStopTimer : TON;       // the drive has not taken 0x0002
+    fbEnableWordOff  : TON;       // no 0x000F can still be on its way
     tStepLimit       : TIME;
     bStepEntered     : BOOL;      // first scan in a new step
     bDriveMoved      : BOOL;      // the decoded state changed this scan
@@ -314,6 +324,11 @@ END_IF
 fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest
                        AND (eDriveState <> E_Cia402State.QuickStopActive),
                  PT := stConfig.tStateTimeout);
+
+// How long the FB's own words have been without bit 3. It reads no state: a
+// statusword that flips between two states must not re-arm it.
+fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,
+                PT := stConfig.tStateTimeout);
 
 // Homing, statusword bits 13, 12, 10. Bits 12 and 13 both 0 (in progress,
 // or not started) cannot be left over from an earlier run. Outside homing
@@ -592,7 +607,8 @@ END_CASE
 CASE eStep OF
 
     E_Cia402Step.Disabled, E_Cia402Step.Error:
-        // The way down: one word per state, as cia402.py plan <state> sod.
+        // The way down: one word per state, the states of cia402.py plan
+        // <state> sod, with 0x0002 for T7, T10 while 0x000F may still come.
         CASE eDriveState OF
             E_Cia402State.OperationEnabled:
                 IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN
@@ -606,6 +622,17 @@ CASE eStep OF
                 ELSE
                     stDrive.nControlword := 16#0002;   // let it finish
                 END_IF
+            E_Cia402State.SwitchedOn, E_Cia402State.ReadyToSwitchOn:
+                // T10, T7. 0x0002 leaves these two as 0x0000 does, but a late
+                // statusword may hide a 0x000F that has put the drive back
+                // in Operation enabled: there it is T11, and 0x0000 is T9.
+                // A drive with no bit 2 reads it as Shutdown and stays. Bit 3
+                // off for tStateTimeout: no 0x000F can still come.
+                IF fbEnableWordOff.Q THEN
+                    stDrive.nControlword := 16#0000;
+                ELSE
+                    stDrive.nControlword := 16#0002;
+                END_IF
             E_Cia402State.Fault, E_Cia402State.FaultReactionActive:
                 stDrive.nControlword := 16#0000;   // bit 7 low
             E_Cia402State.Unknown:
@@ -617,7 +644,7 @@ CASE eStep OF
                     stDrive.nControlword := stDrive.nControlword AND 16#0007;
                 END_IF
         ELSE
-            stDrive.nControlword := 16#0000;   // T10, T7, or at rest
+            stDrive.nControlword := 16#0000;   // at rest
         END_CASE
 
     E_Cia402Step.WaitReady, E_Cia402Step.ResetLow,

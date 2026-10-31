@@ -14,6 +14,15 @@
   asking for a stop never leaves an axis harder to stop.
 - The FB now has 11 pins: twincat-st's reviewer reports CP23 (medium), over PLCopen's suggested
   10. Kept: a stop command belongs on a pin, not inside the process-data struct.
+- Fixed T9 on the way down. A drive that dropped out while 0x000F or 0x001F was still going out
+  was back in Operation enabled when the late statusword showed the drop, and got 0x0000. The FB
+  now leaves Switched on and Ready to switch on with 0x0002 while 0x000F may still come: the
+  same transition there and T11, not T9, if the drive has climbed back, and 0x605A then decides
+  how the motor stops. `cia402.py plan` still says 0x0000, which is right for a caller with no
+  late statusword.
+- Once its words have been without bit 3 for `tStateTimeout` the FB sends 0x0000. A drive that
+  ignores controlword bit 2 therefore still gets down, but a way down from Operation enabled
+  waits that long.
 
 ## 0.1.0 — 2026-10-29
 
