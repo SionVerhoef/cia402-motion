@@ -39,8 +39,8 @@ Details, including the tasks that measured nothing: [`evals/results-ab.md`](eval
   documents. Each claim carries its source and the date it was read.
 - `scripts/cia402.py`: the tool below.
 - `templates/`: `FB_Cia402Axis`, a Structured Text function block that drives one axis
-  through the state machine, the mode switch, homing and fault reset, as TwinCAT 3 files and
-  as one plain `.st`, with PDO mapping tables for CSP and PP. Status and wiring are in
+  through the state machine, the mode switch, homing, quick stop and fault reset, as TwinCAT 3
+  files and as one plain `.st`, with PDO mapping tables for CSP and PP. Status and wiring are in
   `templates/README.md`.
 - `evals/`: the A/B evals, their grader and its self-test, and the trigger evals for the
   description.
@@ -112,9 +112,10 @@ on this page.
   mode codes and homing-method directions. Mode 11 is the exception: canopen does not have it.
 - **Every `plan` is replayed on an independent model drive** in the tests, and `pdo` has a test
   for each rule.
-- **`FB_Cia402Axis` passes twincat-st's reviewer**, `--pedantic` included, and its file check.
+- **`FB_Cia402Axis` passes twincat-st's reviewer**, `--pedantic` included, with one medium
+  finding (CP23: 11 pins, where PLCopen suggests about 10), and its file check.
   Its own Structured Text runs against a simulated drive whose statusword arrives up to three
-  cycles late, every scan checked against the state-machine rules. Each of 32 rules broken on
+  cycles late, every scan checked against the state-machine rules. Each of 46 rules broken on
   purpose makes the scenario named for it fail.
 - **The tests pass on Linux and Windows, and on Python 3.8.**
 - **Agent behaviour in A/B evals** on Opus 5.5 and Haiku 5.5, and the safety refusal on Haiku
