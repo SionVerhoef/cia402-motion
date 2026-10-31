@@ -344,6 +344,22 @@ class Planner(unittest.TestCase):
                         self.assertFalse(writes[i - 1]['controlword'] & 0x80)
                         self.assertFalse(writes[i + 1]['controlword'] & 0x80)
 
+    def test_t7_and_t10_note_the_late_statusword(self):
+        # The word stays 0x0000: right for a caller with no late statusword. The note
+        # carries the race, so that code written from the plan does not lose it.
+        rule = 'rule 9'
+        for start in ('operation_enabled', 'switched_on', 'ready_to_switch_on'):
+            with self.subTest(start=start):
+                r = cia402.plan(start, 'switch_on_disabled')
+                self.assertEqual(r['steps'][-1]['controlword'], 0x0000)
+                self.assertIn(rule, ' '.join(r['notes']))
+        for start, target in (('switch_on_disabled', 'operation_enabled'),
+                              ('fault', 'switch_on_disabled'),
+                              ('operation_enabled', 'switched_on'),
+                              ('quick_stop_active', 'switch_on_disabled')):
+            with self.subTest(start=start, target=target):
+                self.assertNotIn(rule, ' '.join(cia402.plan(start, target)['notes']))
+
     def test_fault_to_operation_enabled(self):
         steps = cia402.plan('fault')['steps']
         self.assertEqual([s['controlword'] for s in steps],

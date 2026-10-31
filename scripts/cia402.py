@@ -269,6 +269,9 @@ CYCLIC_NOTE = ('Cyclic synchronous modes usually run on a synchronised bus (Ethe
 WAIT_NOTE = ('Hold each controlword until the statusword shows the expected state (keep '
              'writing it every cycle if it travels in a PDO), give every wait a timeout, '
              'and decode the statusword again when one expires.')
+LATE_STATUSWORD_NOTE = ('T7 and T10 as 0x0000 assume no 0x000F can still land. Cyclic code '
+                        'with a late statusword: rule 9 of references/state-machine.md, '
+                        "this skill's recommendation and not the profile's.")
 
 
 # --- Parsing ------------------------------------------------------------------------
@@ -766,6 +769,8 @@ def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
             notes.append(AFTER_ENABLE[mode[0]])
         if mode[0] in CYCLIC:
             notes.append(CYCLIC_NOTE)
+    if any(t['id'] in (7, 10) for t in path):
+        notes.append(LATE_STATUSWORD_NOTE)
     if any(s['kind'] != 'prepare' for s in steps):
         notes.append(WAIT_NOTE)
     return {'from': start, 'from_name': STATES[start]['name'], 'to': target,
