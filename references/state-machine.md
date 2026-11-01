@@ -121,8 +121,8 @@ enabled and the motion resumes when bit 8 drops. Quick stop is for abnormal stop
 ## Rules for code that drives the FSA
 
 These are what to check in any master code, PLC function block or script, including your own.
-Scouting found every one of them broken in generated code that explained the rule correctly in
-prose.
+Scouting found each of the first eight broken in generated code that explained the rule
+correctly in prose. Rule 9 came from this skill's own template.
 
 1. **One command at a time, confirmed.** Hold each controlword until the statusword shows the
    expected state (write it every cycle if it travels in a PDO). Give every wait a timeout, and
@@ -150,7 +150,34 @@ prose.
    that means target position = actual position: `modes.md`.
 8. **After a fault or a quick stop, from Switch on disabled, the path is 0x0006 → 0x0007 →
    0x000F.** 0x000F alone does nothing there.
+9. **While a 0x000F may still land, leave Switched on and Ready to switch on with 0x0002, not
+   0x0000.** This is this skill's recommendation, not the profile's, which allows both words for
+   T7 and T10. A cyclic statusword is late. It can show a drive that dropped out by itself
+   while a word with bit 3 set was still going out, and that drive is already back in Operation
+   enabled. There 0x0000 is T9 and 0x0002 is T11; in the two states shown, both go to Switch on
+   disabled.
+   - Send 0x0000 once your own words have been without bit 3 for longer than the statusword can
+     lag. Time your words, not the state: timed on the state, a drive that ignores bit 2 and a
+     late statusword keep the two words chasing each other for ever.
+   - If the late statusword then shows Operation enabled, hold 0x0002 until that time is up, and
+     if the drive has refused T11 fall back to T5.
+   - Abandoning a T4 you just sent is the exception: 0x0007 is T5 if it landed and nothing if it
+     did not, so the stop stays on 0x605C.
 
-`cia402.py plan` follows all eight. `cia402.py decode cw <word>` names the command a word
-actually sends, which catches 0x000B (quick stop, because bit 2 is 0) and 0x008F (bit 7 with the
-enable bits).
+   It costs three things. The motor stops as 0x605A says, not 0x605C, and 0x605A = 0 coasts as T9
+   would. With 0x605A = 5–8 any way down can end in Quick stop active, so it needs the exit of
+   rule 4 even if you never ask for a quick stop. A drive that ignores bit 2 reads 0x0002 as
+   Shutdown, so it needs the 0x0000 above, and waits in Ready to switch on until then; one that
+   climbed back takes T8 (0x605B). Beckhoff's EL72x1 in DS402 reserves bit 2 and has no 0x605A,
+   and LinMot's C125x-MI has no 0x605A: their vendor pages do not say what 0x0002 does there, so
+   try it.
+
+   The race needs a word with bit 3 in the drive or on its way. A fresh statusword is not enough:
+   a 0x000F left standing in 0x6040 still lifts a drive that dropped out. With no such word
+   0x0000 is right. `FB_Cia402Axis` keeps this rule, with `tStateTimeout` as the time:
+   `../templates/README.md`, *Quick stop*.
+
+`cia402.py plan` follows the first eight and notes rule 9 where its path has T7 or T10. It keeps
+0x0000 there, for a caller with no word with bit 3 left to land. `cia402.py decode cw <word>`
+names the command a word actually sends, which catches 0x000B (quick stop, because bit 2 is 0)
+and 0x008F (bit 7 with the enable bits).

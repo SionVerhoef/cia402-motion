@@ -405,7 +405,7 @@ def plan_transitions(start, target, mode=None, quick_stop_stays=False):
 def way_down_transitions(start):
     """plan_transitions to Switch on disabled, with the word the FB sends for T7 and T10 while
     0x000F may still be on its way: 0x0002, which is T11 and not T9 if the drive has climbed
-    back unseen. The plan's 0x0000 is right for a caller with no late statusword."""
+    back unseen. The plan's 0x0000 is right for a caller with no bit 3 left to land."""
     return [(a, b, 0x0002 if a in ('ready_to_switch_on', 'switched_on') else cw)
             for a, b, cw in plan_transitions(start, SOD)]
 

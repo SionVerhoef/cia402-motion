@@ -127,7 +127,7 @@ Operation enabled by the time a late statusword shows the drop, and there 0x0000
 is T11. The motor then stops as 0x605A says, not 0x605C. With 0x605A 5–8 the stop ends as below,
 so `bQuickStopStays` matters even if you never use `bQuickStop`: without it the FB holds 0x0002 for
 ever, and if `bEnable` fell first it does so with `bBusy` TRUE and no error. The plan's 0x0000 is
-right for a caller with no late statusword.
+right for a caller with no word with bit 3 in the drive or on its way.
 
 Once its own words have been without bit 3 for `tStateTimeout`, no 0x000F can still come, and the
 FB sends 0x0000, for a drive with no quick stop. If such a drive ignores bit 2, 0x0002 reads as
