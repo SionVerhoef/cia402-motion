@@ -548,9 +548,18 @@ CASE eStep OF
             eStep := E_Cia402Step.SetMode;
         END_IF
 
-    E_Cia402Step.ResetLow:
+    E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:
+        // A drive can leave Fault without this edge: a reset it took late,
+        // its own input. ResetRelease then judges where it went. Fault
+        // reaction active is still the fault, and is waited for. One scan
+        // of a new state may be a bad word: no attempt is spent on that.
         IF fbStepTimer.Q AND eDriveState = E_Cia402State.Fault THEN
             eStep := E_Cia402Step.ResetEdge;
+        ELSIF NOT bDriveMoved
+              AND (eDriveState <> E_Cia402State.Fault)
+              AND (eDriveState <> E_Cia402State.FaultReactionActive)
+        THEN
+            eStep := E_Cia402Step.ResetRelease;
         END_IF
 
     E_Cia402Step.ResetEdge:
@@ -580,11 +589,6 @@ CASE eStep OF
                     eStep    := E_Cia402Step.Error;
                 END_IF
             END_IF
-        END_IF
-
-    E_Cia402Step.ResetPause:
-        IF fbStepTimer.Q AND eDriveState = E_Cia402State.Fault THEN
-            eStep := E_Cia402Step.ResetEdge;
         END_IF
 
     E_Cia402Step.QuickStop:
