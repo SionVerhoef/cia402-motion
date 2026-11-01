@@ -548,9 +548,21 @@ CASE eStep OF
             eStep := E_Cia402Step.SetMode;
         END_IF
 
-    E_Cia402Step.ResetLow:
-        IF fbStepTimer.Q AND eDriveState = E_Cia402State.Fault THEN
-            eStep := E_Cia402Step.ResetEdge;
+    E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:
+        // A drive can leave Fault without this edge: a reset it took late,
+        // its own input. Bit 7 is low already, so a state that has lasted
+        // the whole step is judged here, and no attempt is counted: none was
+        // made. Fault reaction active is still the fault, and is waited for.
+        IF fbStepTimer.Q THEN
+            IF eDriveState = E_Cia402State.Fault THEN
+                eStep := E_Cia402Step.ResetEdge;
+            ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN
+                nErrorID := 0;
+                eStep    := E_Cia402Step.Disabled;
+            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
+            END_IF
         END_IF
 
     E_Cia402Step.ResetEdge:
@@ -580,11 +592,6 @@ CASE eStep OF
                     eStep    := E_Cia402Step.Error;
                 END_IF
             END_IF
-        END_IF
-
-    E_Cia402Step.ResetPause:
-        IF fbStepTimer.Q AND eDriveState = E_Cia402State.Fault THEN
-            eStep := E_Cia402Step.ResetEdge;
         END_IF
 
     E_Cia402Step.QuickStop:
