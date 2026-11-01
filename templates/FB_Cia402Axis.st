@@ -141,6 +141,13 @@ FUNCTION_BLOCK FB_Cia402Axis
       the motor stops, not 0x605C. Once bit 3 has been off for
       tStateTimeout no 0x000F can still come, and they go out as 0x0000,
       for a drive that does not take 0x0002.
+    - One scan of a bad statusword does not send 0x0000, a fault reset or
+      T2. A new state counts for those only if the next scan shows it too;
+      until then the FB keeps bits 0-2 of its last word, or, while 0x000F
+      may still land, sends 0x0002 as above. Fault and Fault reaction
+      active add no 0x0000 of their own, until a reset. A bad word can
+      still raise an error, and T11 or T5. A word that repeats is not told
+      from the drive: see the README, What it cannot see.
     - Before T4 the set-points cannot move the motor: 0x607A = 0x6064,
       0x60FF = 0, 0x6071 = 0, bits 4-6, 8, 9 = 0. While the drive is
       enabled and they are not the caller's, the FB leaves them as they
@@ -199,7 +206,7 @@ VAR
     bStepEntered     : BOOL;      // first scan in a new step
     bDriveMoved      : BOOL;      // the decoded state changed this scan
     bDriveSeen       : BOOL;      // the drive has left Not ready
-    bAtRest          : BOOL;      // Switch on disabled or Not ready
+    bAtRest          : BOOL;      // at rest, for a second scan
     bQuickStopHeld   : BOOL;      // asked for, not yet released
     bMoving          : BOOL;      // position left the standstill band
     nStandstillRef   : DINT;
@@ -263,8 +270,6 @@ THEN
 ELSIF bDriveSeen AND (eDriveState = E_Cia402State.NotReadyToSwitchOn) THEN
     eDriveState := E_Cia402State.Unknown;
 END_IF
-bAtRest := (eDriveState = E_Cia402State.SwitchOnDisabled)
-           OR (eDriveState = E_Cia402State.NotReadyToSwitchOn);
 
 // 2. Every block that carries state is called here, once per scan, above
 //    the state machine that reads it.
@@ -274,6 +279,12 @@ bStepEntered := (eStep <> eStepPrev);
 bDriveMoved  := (eDriveState <> eDrivePrev);
 eStepPrev    := eStep;
 eDrivePrev   := eDriveState;
+
+// At rest only from the second scan: one bad word is no reason to send
+// 0x0000, or to let a quick stop go.
+bAtRest := NOT bDriveMoved
+           AND ((eDriveState = E_Cia402State.SwitchOnDisabled)
+                OR (eDriveState = E_Cia402State.NotReadyToSwitchOn));
 
 // A reset asked for in Error is kept until it can be acted on, so that an
 // edge in Fault reaction active is not lost.
@@ -377,7 +388,9 @@ CASE eStep OF
               AND eDriveState = E_Cia402State.NotReadyToSwitchOn
         THEN
             eStep := E_Cia402Step.WaitReady;
-        ELSIF bEnable AND eDriveState = E_Cia402State.SwitchOnDisabled THEN
+        ELSIF bEnable AND NOT bDriveMoved
+              AND eDriveState = E_Cia402State.SwitchOnDisabled
+        THEN
             eStep := E_Cia402Step.Shutdown;
         ELSIF fbStepTimer.Q
               AND ((eDriveState = E_Cia402State.OperationEnabled)
@@ -584,8 +597,9 @@ CASE eStep OF
 
     E_Cia402Step.Error:
         // On the way down, as Disabled. A reset waits while the drive is
-        // in Fault reaction active or its statusword decodes to nothing.
-        IF bResetRequest THEN
+        // in Fault reaction active or its statusword decodes to nothing,
+        // and for a second scan of a new state: ResetLow sends 0x0000.
+        IF bResetRequest AND NOT bDriveMoved THEN
             IF eDriveState = E_Cia402State.Fault THEN
                 nErrorID    := 0;
                 nResetCount := 0;
@@ -608,8 +622,9 @@ END_CASE
 CASE eStep OF
 
     E_Cia402Step.Disabled, E_Cia402Step.Error:
-        // The way down: one word per state, the states of cia402.py plan
-        // <state> sod, with 0x0002 for T7, T10 while 0x000F may still come.
+        // The way down: the states of cia402.py plan <state> sod, with
+        // 0x0002 for T7, T10 while 0x000F may still come. One word per
+        // state, but for the first scan of a state: see bDriveMoved below.
         CASE eDriveState OF
             E_Cia402State.OperationEnabled:
                 // 0x0002 sent below may have gone out after a statusword
@@ -635,23 +650,33 @@ CASE eStep OF
                 // in Operation enabled: there it is T11, and 0x0000 is T9.
                 // A drive may ignore bit 2 and read it as Shutdown. Once bit
                 // 3 has been off for tStateTimeout no 0x000F can still come.
-                IF fbEnableWordOff.Q THEN
+                // Seen for one scan it may be a bad word: keep the last word,
+                // never 0x0002 here, which would chase 0x0000 on such a drive.
+                IF fbEnableWordOff.Q AND NOT bDriveMoved THEN
                     stDrive.nControlword := 16#0000;
+                ELSIF fbEnableWordOff.Q THEN
+                    stDrive.nControlword := stDrive.nControlword AND 16#0007;
                 ELSE
                     stDrive.nControlword := 16#0002;
                 END_IF
-            E_Cia402State.Fault, E_Cia402State.FaultReactionActive:
-                stDrive.nControlword := 16#0000;   // bit 7 low
+            E_Cia402State.Fault, E_Cia402State.FaultReactionActive,
             E_Cia402State.Unknown:
                 // Keep the last word, less enable operation, the mode bits
-                // and bit 7: it cannot enable, and it cannot cut power.
+                // and bit 7: it cannot enable, and it cannot cut power. A
+                // drive in Fault ignores it, and the word may be a bad one.
                 IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN
                     stDrive.nControlword := 16#0002;
                 ELSE
                     stDrive.nControlword := stDrive.nControlword AND 16#0007;
                 END_IF
         ELSE
-            stDrive.nControlword := 16#0000;   // at rest
+            // At rest. Seen for one scan it may be a bad word: to a drive
+            // still enabled, 0x0000 would be T9.
+            IF bDriveMoved THEN
+                stDrive.nControlword := stDrive.nControlword AND 16#0007;
+            ELSE
+                stDrive.nControlword := 16#0000;
+            END_IF
         END_CASE
 
     E_Cia402Step.WaitReady, E_Cia402Step.ResetLow,
@@ -718,8 +743,11 @@ bRunningLastScan := (eStep = E_Cia402Step.Running);
 //    FB holds them where enabling cannot move the motor. With the drive
 //    enabled it leaves them as they were, so that it never steps one the
 //    drive is following; a mode switch makes the new mode's set-point
-//    safe. The caller's mode bits are cleared until bValid.
-IF eStep = E_Cia402Step.Running THEN
+//    safe. The caller's mode bits are cleared until bValid. One scan of
+//    a new state does not count: the drive may still be following.
+IF (eStep = E_Cia402Step.Running)
+   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))
+THEN
     ;
 ELSIF (eDriveState <> E_Cia402State.OperationEnabled)
       AND (eDriveState <> E_Cia402State.QuickStopActive)
