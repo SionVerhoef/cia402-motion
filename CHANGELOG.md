@@ -15,10 +15,12 @@
 - The FB now has 11 pins: twincat-st's reviewer reports CP23 (medium), over PLCopen's suggested
   10. Kept: a stop command belongs on a pin, not inside the process-data struct.
 - Fixed a hang in the fault reset. A drive that left Fault by itself before an attempt or in the
-  pause between two, a reset taken late for one, left the FB waiting for Fault for ever: `bBusy`
-  TRUE, no error, 0x0000, `bQuickStop` ignored. It now ends the reset as after an attempt: Switch
-  on disabled clears the error, any other state is 16#8113. Fault reaction active still waits,
-  and one scan of another state spends no attempt.
+  pause between two, a reset taken late for one, left the FB waiting for Fault for ever: no error,
+  0x0000, `bQuickStop` ignored, and with `bEnable` TRUE `bBusy` stuck. A new state that lasts the
+  whole step now ends the reset: Switch on disabled clears the error, and any other state that
+  stays is 16#8113. A shorter word spends no attempt, and these steps never count one. Not fixed:
+  the FB still waits with no limit on a drive that stays in Fault reaction active, or a statusword
+  that changes state on every scan.
 - Fixed T9 and a cut quick stop from one bad statusword. A word that decoded for one scan as
   Fault, Switch on disabled, or on a long stop Switched on or Ready to switch on, got 0x0000 on
   that scan, whatever the drive was really doing. The FB now sends 0x0000 for such a word only if

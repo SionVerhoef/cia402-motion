@@ -431,6 +431,18 @@ class TemplateCase(unittest.TestCase):
         rig.valid()
         return rig
 
+    def persistent_fault(self, lag=0, config=None):
+        rig = self.running(lag=lag, config=config)
+        rig.drive.fault(persists=True)
+        rig.error(ERR['drive_fault'])
+        rig.run(10)
+        return rig
+
+    def in_step(self, rig, step):
+        """bReset, then on to `step`: the drive stays in Fault that long."""
+        rig.pulse_reset()
+        rig.until(lambda r: r.fb['eStep'].name == step, what=step)
+
 
 class Decode(TemplateCase):
 
@@ -918,14 +930,10 @@ class CommandedQuickStop(TemplateCase):
                         self.held_down(rig)
 
     def test_raised_as_the_drive_leaves_fault_by_itself_in_a_reset(self):
-        for lag, pulse in product((0, 1, 2, 3), (False, True)):
-            with self.subTest(lag=lag, pulse=pulse):
-                rig = self.running(lag=lag)
-                rig.drive.fault(persists=True)
-                rig.error(ERR['drive_fault'])
-                rig.run(10)
-                rig.pulse_reset()
-                rig.until(lambda r: r.fb['eStep'].name == 'ResetPause', what='ResetPause')
+        for lag, pulse, step in product((0, 1, 2, 3), (False, True), ('ResetLow', 'ResetPause')):
+            with self.subTest(lag=lag, pulse=pulse, step=step):
+                rig = self.persistent_fault(lag)
+                self.in_step(rig, step)
                 self.ask(rig, pulse)
                 rig.drive.drop(SOD)
                 rig.at_rest()
@@ -949,18 +957,6 @@ class CommandedQuickStop(TemplateCase):
 
 
 class FaultReset(TemplateCase):
-
-    def persistent_fault(self, lag=0):
-        rig = self.running(lag=lag)
-        rig.drive.fault(persists=True)
-        rig.error(ERR['drive_fault'])
-        rig.run(10)
-        return rig
-
-    def in_step(self, rig, step):
-        """bReset, then on to `step`: the drive stays in Fault that long."""
-        rig.pulse_reset()
-        rig.until(lambda r: r.fb['eStep'].name == step, what=step)
 
     # (step, scans into it): ResetLow lasts cResetSettle, ResetPause tResetPause.
     OUT_OF_FAULT = [('ResetLow', 0), ('ResetLow', 1), ('ResetLow', 2), ('ResetPause', 0),
@@ -1012,7 +1008,6 @@ class FaultReset(TemplateCase):
                     rig.at_rest()
                     rig.enable = True
                 rig.valid()
-                self.assertFalse(rig.out['bError'])
                 self.assertEqual(rig.out['nErrorID'], 0)
                 self.assertFalse(any(w & 0x80 for w in rig.words[mark + lag:]))
 
@@ -1024,15 +1019,17 @@ class FaultReset(TemplateCase):
                 rig.run(at)
                 rig.drive.refuse = (SOD,)
                 rig.drive.drop('ready_to_switch_on')
+                mark = len(rig.words)
                 rig.error(ERR['left_state'])
+                self.assertFalse(any(w & 0x80 for w in rig.words[mark + lag:]))
 
     def test_fault_reaction_active_in_the_reset_waits_for_fault(self):
         # Still the fault: no attempt spent on it, and bit 7 only once the drive is in Fault.
-        for lag in (0, 1, 2, 3):
-            with self.subTest(lag=lag):
+        for lag, step in product((0, 1, 2, 3), ('ResetLow', 'ResetPause')):
+            with self.subTest(lag=lag, step=step):
                 rig = self.persistent_fault(lag)
                 mark = len(rig.words)
-                self.in_step(rig, 'ResetPause')
+                self.in_step(rig, step)
                 rig.drive.fra_scans = 30
                 rig.drive.fault(persists=True)
                 rig.error(ERR['reset_failed'])
@@ -1644,20 +1641,20 @@ class BadStatusword(TemplateCase):
                 rig.run(lag + 5)
 
     def test_in_a_reset_it_spends_no_attempt(self):
-        # The drive is still in Fault: all the attempts still go out.
-        for lag, step, word in product(self.LAGS, ('ResetLow', 'ResetPause'),
-                                       self.AT_REST + self.DOWN):
-            with self.subTest(lag=lag, step=step, word=hex(word)):
-                rig = self.running(lag=lag)
-                rig.drive.fault(persists=True)
-                rig.error(ERR['drive_fault'])
-                rig.run(10)
+        # The drive is still in Fault: every attempt still goes out, the only one included.
+        # Two scans: in a fast task, one bad frame is two scans.
+        for lag, step, word, scans, attempts in product(
+                self.LAGS, ('ResetLow', 'ResetPause'), self.AT_REST + self.DOWN, (1, 2), (1, 3)):
+            if attempts == 1 and step == 'ResetPause':
+                continue  # one attempt has no pause
+            with self.subTest(lag=lag, step=step, word=hex(word), scans=scans, attempts=attempts):
+                rig = self.persistent_fault(lag, config={'nResetAttempts': attempts})
                 mark = len(rig.words)
-                rig.pulse_reset()
-                rig.until(lambda r: r.fb['eStep'].name == step, what=step)
-                self.bad_scan(rig, word)
+                self.in_step(rig, step)
+                for _ in range(scans):
+                    self.bad_scan(rig, word)
                 rig.error(ERR['reset_failed'])
-                self.assertEqual(len(rig.edges_of_bit_7(mark)), 3)
+                self.assertEqual(len(rig.edges_of_bit_7(mark)), attempts)
 
     def test_a_word_that_stays_in_fault(self):
         # No 0x0000 from there until a reset: the README says what a reset does then.
@@ -2072,20 +2069,23 @@ BROKEN_RULES = {
         '        END_IF\n\n    E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:',
         Errors, 'test_drive_that_drops_out_is_not_enabled_again_without_reset'),
     'a drive out of Fault left waiting in the reset': (
-        '            eStep := E_Cia402Step.ResetRelease;\n        END_IF\n\n'
-        '    E_Cia402Step.ResetEdge:',
-        '            ;\n        END_IF\n\n    E_Cia402Step.ResetEdge:',
+        '            ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN\n'
+        '                nErrorID := 0;\n'
+        '                eStep    := E_Cia402Step.Disabled;\n'
+        '            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n'
+        '                nErrorID := cErrLeftState;\n'
+        '                eStep    := E_Cia402Step.Error;\n'
+        '            END_IF\n        END_IF\n\n    E_Cia402Step.ResetEdge:',
+        '            END_IF\n        END_IF\n\n    E_Cia402Step.ResetEdge:',
         FaultReset, 'test_a_drive_that_leaves_fault_by_itself_in_the_reset'),
-    'one scan out of Fault spends a reset attempt': (
-        '        ELSIF NOT bDriveMoved\n              AND (eDriveState <> E_Cia402State.Fault)\n',
-        '        ELSIF (eDriveState <> E_Cia402State.Fault)\n',
+    'a short bad word out of Fault ends the reset': (
+        '        IF fbStepTimer.Q THEN\n            IF eDriveState = E_Cia402State.Fault THEN\n',
+        '        IF fbStepTimer.Q OR NOT bDriveMoved THEN\n'
+        '            IF eDriveState = E_Cia402State.Fault THEN\n',
         BadStatusword, 'test_in_a_reset_it_spends_no_attempt'),
     'Fault reaction active taken for out of Fault in the reset': (
-        '              AND (eDriveState <> E_Cia402State.Fault)\n'
-        '              AND (eDriveState <> E_Cia402State.FaultReactionActive)\n'
-        '        THEN\n            eStep := E_Cia402Step.ResetRelease;',
-        '              AND (eDriveState <> E_Cia402State.Fault)\n'
-        '        THEN\n            eStep := E_Cia402Step.ResetRelease;',
+        '            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n',
+        '            ELSE\n',
         FaultReset, 'test_fault_reaction_active_in_the_reset_waits_for_fault'),
 }
 
