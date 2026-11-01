@@ -99,7 +99,7 @@ FB does not write it, and what a drive offers differs by vendor
 (`../references/state-machine.md`). From Ready to switch on or Switched on the drive goes
 straight to Switch on disabled, and a T4 still on its way meets T11, never T9. `bValid` falls at
 once. It is not an error: `bError` stays FALSE. In Error the word replaces T5, and the last word
-kept for a statusword that decodes to nothing.
+kept for Fault, Fault reaction active and a statusword that decodes to nothing.
 
 **A drive that does not take it.** If the drive has reached neither Quick stop active nor Switch
 on disabled after `tStateTimeout`, that is 16#8108, and the FB takes it down with T5, so that
@@ -235,6 +235,19 @@ write 0x6060 by SDO for every mode switch and copy 0x6061, read by SDO, into
   not received), the inputs may freeze, and the FB keeps reading the last statusword as true.
   Gate on the bus state in your application, and hand bus faults to **ethercat-diagnostics**.
   Inputs that drop to 0 are caught: Not ready after another state is 16#8115.
+- **Whether one statusword is true.** A word that shows Fault, Switch on disabled or another
+  new state raises its error and starts the way down at once, but 0x0000, a fault reset, T2 from
+  rest and a change of set-point wait for the next scan to show the same state. So one bad scan
+  stops the axis, but gets neither T9 nor T12 in a quick stop ramp. It can get T5, and T11:
+  a word that shows Quick stop active always gets 0x0002, and so does Switched on or Ready to
+  switch on while 0x000F may still land. With 0x605A = 0, T11 coasts as T9 would.
+  In Fault and Fault reaction active the FB adds no 0x0000: it keeps bits 0-2 of its last word,
+  which the profile's Fault ignores. That limit is scans, not bus frames: two scans in a row of
+  the same state are believed, so if the task runs faster than the statusword updates, one bad
+  frame counts as two. Then a word that shows Switch on disabled, Switched on or Ready to switch
+  on gets 0x0000, T9 or T12 included, if the drive is still stopping. A word that shows Fault
+  for two scans is believed by `bReset`: the reset's 0x0000 is T9 to a drive really enabled, so
+  an application that resets on `bError` by itself should wait, or check the drive first.
 - **A state the drive has just entered by itself.** Until the statusword shows it, the FB keeps
   sending the word for the state it last saw: bit 7 for a cycle or two after a fault reset
   succeeded, 0x000F for a cycle or two after the drive went into Quick stop active on its own.
@@ -266,6 +279,10 @@ compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. 
 - `bEnable` dropped at every scan of the way up, and raised again at every scan of the way down;
 - a drive that drops out while 0x000F or 0x001F is going out, running, homing or in a mode
   switch, and a drive that ignores controlword bit 2;
+- one scan of a statusword that shows Fault, Fault reaction active or Switch on disabled, while
+  running and as 0x000F goes out; those and Switched on and Ready to switch on, in a stop or a
+  quick stop longer than `tStateTimeout`; `bEnable` or `bReset` rising on that scan; a pulsed
+  `bQuickStop` held through it; and a Fault word that lasts;
 - quick stops that end by themselves, ones that stay, and one without 0x6064;
 - quick stops asked for: a ramp longer than `tStopTimeout`, a drive that refuses T11, a fault
   or a bad statusword during the stop and while held down, and `bQuickStop`, held and as a

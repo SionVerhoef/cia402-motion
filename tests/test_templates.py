@@ -947,7 +947,7 @@ class FaultReset(TemplateCase):
         rig.drive.fault()
         rig.error(ERR['drive_fault'])
         rig.run(10)
-        self.assertEqual(rig.words[-1], 0x0000)
+        self.assertEqual(rig.words[-1], 0x0007)  # a drive in Fault ignores it: no bits 3, 7
         mark = len(rig.words)
         rig.pulse_reset()
         rig.valid()
@@ -1088,6 +1088,16 @@ class ModeSwitch(TemplateCase):
                 rig.valid()
                 self.assertEqual(rig.drive.display, 6)
 
+    def test_change_on_the_scan_operation_enabled_shows_is_still_made_safe_first(self):
+        for at in range(6):
+            with self.subTest(at=at):
+                rig = self.make(jitter=1)
+                rig.enable, rig.mode = True, 3
+                rig.until(lambda r: r.words[-1] == 0x000F, what='T4')
+                rig.run(at)
+                rig.mode = 8
+                rig.valid()
+
     def test_drop_to_switched_on_during_a_switch_is_an_error(self):
         rig = self.running(mode_delay=20)
         rig.mode = 9
@@ -1146,7 +1156,7 @@ class Homing(TemplateCase):
         rig.enable, rig.mode = True, 6
         rig.error(ERR['homing'])
         rig.until(lambda r: r.drive.state == SOD, what='way down')
-        rig.scan()
+        rig.run(2)  # one to show it, one to believe it
         self.assertEqual(rig.words[-1], 0x0000)
 
     def test_homing_that_does_not_end_times_out(self):
@@ -1311,8 +1321,10 @@ class StaleWordOnTheWayDown(TemplateCase):
                 rig.enable, rig.mode = True, 6
                 rig.until(lambda r: r.words[-1] == 0x001F, what='bit 4')
                 rig.run(lag + 2 + held)
+                mark = len(rig.words)
                 rig.drive.drop('switched_on')
                 self.goes_down(rig)
+                self.assertIn(0x0002, rig.words[mark:])  # 0x001F had bit 3, not the word 0x000F
 
     def test_drop_during_a_mode_switch(self):
         for lag in self.LAGS:
@@ -1384,6 +1396,21 @@ class NoBit2(TemplateCase):
                 rig.error(ERR['left_state'])
                 rig.until(lambda r: r.drive.state == SOD, what='way down')
 
+    def test_a_stop_longer_than_tstatetimeout_does_not_chase(self):
+        # 0x0002 on the first scan of a state, with no 0x000F left to land, is Shutdown here:
+        # it and 0x0000 chase each other for ever, each change re-arming the step's timeout.
+        for lag in self.LAGS:
+            with self.subTest(lag=lag):
+                rig = self.running(lag=lag, ignores_bit_2=True)
+                mark = len(rig.drive.transitions)
+                rig.drive.refuse = ('switched_on',)
+                rig.enable = False
+                rig.run(30)
+                rig.drive.refuse = ()
+                rig.run(100)
+                self.assertEqual(rig.drive.state, SOD)
+                self.assertLessEqual(len(rig.drive.transitions[mark:]), 3)
+
     def test_quick_stop_is_an_error_and_ends_at_rest(self):
         for lag, pulse in product(self.LAGS, (False, True)):
             with self.subTest(lag=lag, pulse=pulse):
@@ -1393,6 +1420,182 @@ class NoBit2(TemplateCase):
                 rig.quick_stop = not pulse
                 rig.error(ERR['no_quick_stop'])
                 rig.until(lambda r: r.drive.state == SOD, what='way down')
+
+
+class BadStatusword(TemplateCase):
+    """One scan of inputs that are not the drive's, as it stands in a state where 0x0000 would
+    do harm. The word reaches the FB `lag` scans later, and the scans after it are good."""
+
+    LAGS = StaleWordOnTheWayDown.LAGS
+    FAULT = (0x0009, 0x000B, 0x000D, 0x000F)
+    AT_REST = (0x0240, 0x0250, 0x0260)
+    DOWN = (0x0021, 0x0023)
+
+    def bad_scan(self, rig, word):
+        rig.drive.override_sw = word
+        rig.scan()
+        rig.drive.override_sw = None
+
+    def slow_stop(self, lag):
+        """bEnable FALSE, and a drive still in Operation enabled past tStateTimeout: 0x0007
+        has been out for that long, so that fbEnableWordOff says nothing here."""
+        rig = self.running(lag=lag)
+        rig.drive.refuse = ('switched_on', SOD)
+        rig.enable = False
+        rig.run(30)
+        self.assertEqual(rig.drive.state, OE)
+        return rig
+
+    def test_running_with_the_target_moving(self):
+        for lag, word in product(self.LAGS, self.FAULT + self.AT_REST):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.running(lag=lag)
+                rig.caller = ramp(50)
+                rig.run(10)
+                self.bad_scan(rig, word)
+                rig.until(lambda r: r.out['bError'], what='the error')
+                rig.until(lambda r: r.drive.state == SOD, what='way down')
+
+    def test_running_with_another_set_point_moving(self):
+        for lag, (mode, name), word in product(
+                self.LAGS, ((9, 'nTargetVelocity'), (10, 'nTargetTorque')),
+                self.FAULT + self.AT_REST + self.DOWN):
+            with self.subTest(lag=lag, mode=mode, word=hex(word)):
+                rig = self.running(lag=lag, mode=mode)
+                rig.caller = lambda r, n=name: r.io.__setitem__(n, r.io[n] + 5)
+                rig.run(10)
+                self.bad_scan(rig, word)
+                rig.until(lambda r: r.out['bError'], what='the error')
+                rig.until(lambda r: r.drive.state == SOD, what='way down')
+
+    def test_the_word_kept_has_only_bits_0_to_2(self):
+        # Halt held: neither bit 3 nor the caller's bits outlive bValid.
+        for lag, word in product(self.LAGS, self.FAULT + self.AT_REST):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.running(lag=lag, mode=9)
+                rig.caller = lambda r: r.io.__setitem__('nModeBits', 0x0100)
+                rig.run(5)
+                self.assertEqual(rig.words[-1], 0x010F)
+                mark = len(rig.words)
+                self.bad_scan(rig, word)
+                rig.run(lag)
+                self.assertTrue(rig.out['bError'])
+                self.assertEqual(rig.words[mark + lag], 0x0007)  # the scan the FB saw it
+
+    def test_as_0x000f_goes_out(self):
+        # The shape that found it: a drive that wants a steady word takes T4 late.
+        for lag, at, word in product(self.LAGS, range(1, 6), self.FAULT + self.AT_REST):
+            with self.subTest(lag=lag, at=at, word=hex(word)):
+                rig = self.make(lag=lag, settle=3)
+                rig.enable, rig.mode = True, 8
+                rig.until(lambda r: r.words[-1] == 0x000F, what='T4')
+                rig.run(at - 1)
+                self.bad_scan(rig, word)
+                rig.until(lambda r: r.drive.state == SOD and r.out['bError'], what='way down')
+
+    def test_in_a_stop_longer_than_tstatetimeout(self):
+        for lag, word in product(self.LAGS, self.FAULT + self.AT_REST + self.DOWN):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.slow_stop(lag)
+                self.bad_scan(rig, word)
+                rig.run(lag + 5)
+                self.assertEqual(rig.drive.state, OE)  # no T11 on top of the T5 either
+
+    def test_in_a_quick_stop_longer_than_tstatetimeout(self):
+        # 0x0000 there is T12: the motor coasts. 0x0002 has been out for over tStateTimeout.
+        for lag, asked, word in product(self.LAGS, (True, False),
+                                        self.FAULT + self.AT_REST + self.DOWN):
+            with self.subTest(lag=lag, asked=asked, word=hex(word)):
+                rig = self.running(lag=lag, qs_ramp=100)
+                if asked:
+                    rig.quick_stop = True
+                else:
+                    rig.drive.external_quick_stop()
+                    rig.enable = False
+                rig.run(lag + 30)
+                self.bad_scan(rig, word)
+                rig.run(lag + 5)
+                self.assertEqual(rig.words[-1], 0x0002)
+
+    def test_in_an_error_with_the_drive_still_enabled(self):
+        for lag, word in product(self.LAGS, self.AT_REST + self.DOWN):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.slow_stop(lag)
+                rig.error(ERR['stop'])
+                self.bad_scan(rig, word)
+                rig.run(lag + 5)
+                self.assertEqual(rig.drive.state, OE)
+
+    def test_after_a_refused_t11_with_the_drive_still_enabled(self):
+        for lag, word in product(self.LAGS, self.AT_REST):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.running(lag=lag)
+                rig.drive.refuse = ('quick_stop_active', 'switched_on', SOD)
+                rig.quick_stop = True
+                rig.error(ERR['no_quick_stop'])
+                rig.run(lag + 2)
+                self.bad_scan(rig, word)
+                rig.run(lag + 5)
+                self.assertEqual(rig.drive.state, OE)
+
+    def test_a_pulsed_quick_stop_stays_held(self):
+        # bQuickStop is FALSE by then: one scan of at rest must not release the latch.
+        for lag, word in product(self.LAGS, self.AT_REST):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.running(lag=lag, qs_ramp=100)
+                rig.quick_stop, rig.enable = True, False
+                rig.scan()
+                rig.quick_stop = False
+                rig.run(lag + 5)
+                self.bad_scan(rig, word)
+                rig.run(lag + 2)
+                rig.enable = True
+                rig.run(150)
+                self.assertEqual(rig.drive.state, SOD)
+                self.assertEqual(rig.words[-1], 0x0000)
+
+    def test_enable_raised_on_the_scan(self):
+        # Switch on disabled for one scan is no reason to send T2: on this drive it is T8.
+        for lag, word in product(self.LAGS, self.AT_REST):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.slow_stop(lag)
+                rig.enable = True
+                mark = len(rig.words)
+                self.bad_scan(rig, word)
+                rig.run(lag + 5)
+                self.assertNotIn(0x0006, rig.words[mark:])
+
+    def test_a_reset_on_the_scan(self):
+        # A reset begins with 0x0000. It is for a drive seen in Fault twice.
+        for lag, word in product(self.LAGS, self.FAULT):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.slow_stop(lag)
+                rig.error(ERR['stop'])
+                for n in range(lag + 1):
+                    rig.drive.override_sw = None if n else word
+                    rig.reset = n == lag
+                    rig.scan()
+                rig.drive.override_sw, rig.reset = None, False
+                rig.run(lag + 5)
+
+    def test_a_word_that_stays_in_fault(self):
+        # No 0x0000 from there until a reset: the README says what a reset does then.
+        for lag, word in product(self.LAGS, self.FAULT):
+            with self.subTest(lag=lag, word=hex(word)):
+                rig = self.slow_stop(lag)
+                rig.drive.override_sw = word
+                rig.run(lag + 30)
+                rig.drive.override_sw = None
+                self.assertEqual(rig.words[-1], 0x0007)
+
+    def test_a_real_drop_still_ends_in_0x0000(self):
+        for lag in self.LAGS:
+            with self.subTest(lag=lag):
+                rig = self.running(lag=lag)
+                rig.drive.drop(SOD)
+                rig.until(lambda r: r.out['bError'], what='the error')
+                rig.run(lag + 2)
+                self.assertEqual(rig.words[-1], 0x0000)
 
 
 class Errors(TemplateCase):
@@ -1556,8 +1759,8 @@ BROKEN_RULES = {
         '                IF bQuickStopHeld\n',
         CommandedQuickStop, 'test_a_drive_that_refuses_t11_is_taken_down_with_t5'),
     'T5 for a quick stop asked with an undecodable statusword': (
-        'it cannot cut power.\n                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
-        'it cannot cut power.\n                IF FALSE THEN',
+        'may be a bad one.\n                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
+        'may be a bad one.\n                IF FALSE THEN',
         CommandedQuickStop, 'test_an_undecodable_statusword_gets_0x0002_as_well'),
     'quick stop forgotten in an error': (
         'ELSIF bQuickStopHeld AND NOT bResetting THEN',
@@ -1600,8 +1803,8 @@ BROKEN_RULES = {
         '',
         FaultReset, 'test_reset_attempts_restart_on_each_reset'),
     'reset asked in Fault reaction active dropped': (
-        '        IF bResetRequest THEN',
-        '        IF bResetRequest AND fbResetTrig.Q THEN',
+        '        IF bResetRequest AND NOT bDriveMoved THEN',
+        '        IF bResetRequest AND NOT bDriveMoved AND fbResetTrig.Q THEN',
         FaultReset, 'test_reset_asked_in_fault_reaction_active_is_kept'),
     'stale homing result taken': (
         '        ELSIF bHomingRunSeen\n              AND ((stDrive.nStatusword AND 16#3400)',
@@ -1673,13 +1876,13 @@ BROKEN_RULES = {
         '            E_Cia402State.Fault,',
         StaleWordOnTheWayDown, 'test_drop_to_switched_on_while_running'),
     "tStopTimeout taken for 0x0002's way out": (
-        '                IF fbEnableWordOff.Q THEN\n'
+        '                IF fbEnableWordOff.Q AND NOT bDriveMoved THEN\n'
         '                    stDrive.nControlword := 16#0000;',
         '                IF fbStepTimer.Q THEN\n'
         '                    stDrive.nControlword := 16#0000;',
         NoBit2, 'test_way_down_from_each_state'),
     'no way out of 0x0002 for a drive that ignores bit 2': (
-        '                IF fbEnableWordOff.Q THEN\n'
+        '                IF fbEnableWordOff.Q AND NOT bDriveMoved THEN\n'
         '                    stDrive.nControlword := 16#0000;',
         '                IF FALSE THEN\n'
         '                    stDrive.nControlword := 16#0000;',
@@ -1710,9 +1913,73 @@ BROKEN_RULES = {
         'ELSIF FALSE THEN',
         Errors, 'test_statusword_0000_while_running'),
     'undecodable statusword keeps the drive enabled': (
-        'stDrive.nControlword := stDrive.nControlword AND 16#0007;',
-        ';',
+        '                ELSE\n'
+        '                    stDrive.nControlword := stDrive.nControlword AND 16#0007;',
+        '                ELSE\n'
+        '                    ;',
         Errors, 'test_statusword_that_decodes_to_nothing'),
+    'one scan of Fault gets 0x0000': (
+        '            E_Cia402State.Fault, E_Cia402State.FaultReactionActive,\n'
+        '            E_Cia402State.Unknown:',
+        '            E_Cia402State.Fault, E_Cia402State.FaultReactionActive:\n'
+        '                stDrive.nControlword := 16#0000;\n'
+        '            E_Cia402State.Unknown:',
+        BadStatusword, 'test_running_with_the_target_moving'),
+    'one scan of at rest gets 0x0000': (
+        '            IF bDriveMoved THEN\n',
+        '            IF FALSE THEN\n',
+        BadStatusword, 'test_running_with_the_target_moving'),
+    'one scan of Switched on gets 0x0000 in a long stop': (
+        'IF fbEnableWordOff.Q AND NOT bDriveMoved THEN',
+        'IF fbEnableWordOff.Q THEN',
+        BadStatusword, 'test_in_a_stop_longer_than_tstatetimeout'),
+    'one scan of at rest cuts a commanded quick stop': (
+        'bAtRest := NOT bDriveMoved\n           AND ((eDriveState',
+        'bAtRest := TRUE\n           AND ((eDriveState',
+        BadStatusword, 'test_in_a_quick_stop_longer_than_tstatetimeout'),
+    'one scan of at rest starts T2': (
+        'ELSIF bEnable AND NOT bDriveMoved\n',
+        'ELSIF bEnable\n',
+        BadStatusword, 'test_enable_raised_on_the_scan'),
+    'one scan of at rest releases a quick stop': (
+        'bAtRest := NOT bDriveMoved\n           AND ((eDriveState',
+        'bAtRest := TRUE\n           AND ((eDriveState',
+        BadStatusword, 'test_a_pulsed_quick_stop_stays_held'),
+    '0x0002 chasing 0x0000 on the first scan of a state': (
+        '                ELSIF fbEnableWordOff.Q THEN\n'
+        '                    stDrive.nControlword := stDrive.nControlword AND 16#0007;\n',
+        '',
+        NoBit2, 'test_a_stop_longer_than_tstatetimeout_does_not_chase'),
+    'set-point not made safe on the first scan of Operation enabled': (
+        '   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
+        '   OR bDriveMoved\n',
+        ModeSwitch, 'test_change_on_the_scan_operation_enabled_shows_is_still_made_safe_first'),
+    'the word kept at rest keeps bit 3': (
+        '            IF bDriveMoved THEN\n'
+        '                stDrive.nControlword := stDrive.nControlword AND 16#0007;',
+        '            IF bDriveMoved THEN\n'
+        '                stDrive.nControlword := stDrive.nControlword AND 16#000F;',
+        BadStatusword, 'test_the_word_kept_has_only_bits_0_to_2'),
+    'one scan of at rest gets 0x0000 with a quick stop held': (
+        '            IF bDriveMoved THEN\n',
+        '            IF bDriveMoved AND NOT bQuickStopHeld THEN\n',
+        BadStatusword, 'test_after_a_refused_t11_with_the_drive_still_enabled'),
+    'one scan of Switched on gets 0x0000 in an error': (
+        'IF fbEnableWordOff.Q AND NOT bDriveMoved THEN',
+        'IF fbEnableWordOff.Q AND NOT (bDriveMoved AND (eStep = E_Cia402Step.Disabled)) THEN',
+        BadStatusword, 'test_in_an_error_with_the_drive_still_enabled'),
+    'one scan of another state zeroes velocity or torque': (
+        '   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
+        '',
+        BadStatusword, 'test_running_with_another_set_point_moving'),
+    'one scan of Fault starts a reset': (
+        'IF bResetRequest AND NOT bDriveMoved THEN',
+        'IF bResetRequest THEN',
+        BadStatusword, 'test_a_reset_on_the_scan'),
+    'one scan of another state steps the target': (
+        '   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
+        '',
+        BadStatusword, 'test_running_with_the_target_moving'),
     'drop out enabled again without reset': (
         '            nErrorID := cErrLeftState;\n            eStep    := E_Cia402Step.Error;\n'
         '        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> '

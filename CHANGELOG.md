@@ -14,6 +14,13 @@
   asking for a stop never leaves an axis harder to stop.
 - The FB now has 11 pins: twincat-st's reviewer reports CP23 (medium), over PLCopen's suggested
   10. Kept: a stop command belongs on a pin, not inside the process-data struct.
+- Fixed T9 and a cut quick stop from one bad statusword. A word that decoded for one scan as
+  Fault, Switch on disabled, or on a long stop Switched on or Ready to switch on, got 0x0000 on
+  that scan, whatever the drive was really doing. The FB now sends 0x0000 for such a word only if
+  the next scan shows the same state, and in Fault keeps bits 0-2 of its last word instead. That
+  scan no longer starts a fault reset or T2, steps a set-point or releases a quick stop. The
+  error and the way down still start at once, and it can still get T5 or T11. Two equal scans
+  are believed, including by `bReset` on a word that shows Fault: see the templates README.
 - Fixed T9 on the way down. A drive that dropped out while 0x000F or 0x001F was still going out
   was back in Operation enabled when the late statusword showed the drop, and got 0x0000. The FB
   now leaves Switched on and Ready to switch on with 0x0002 while 0x000F may still come: the
