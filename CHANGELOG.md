@@ -18,9 +18,12 @@
   pause between two, a reset taken late for one, left the FB waiting for Fault for ever: no error,
   0x0000, `bQuickStop` ignored, and with `bEnable` TRUE `bBusy` stuck. A new state that lasts the
   whole step now ends the reset: Switch on disabled clears the error, and any other state that
-  stays is 16#8113. A shorter word spends no attempt, and these steps never count one. Not fixed:
-  the FB still waits with no limit on a drive that stays in Fault reaction active, or a statusword
-  that changes state on every scan.
+  stays is 16#8113. A shorter word spends no attempt, and these steps never count one.
+- Fixed two more hangs in the fault reset: a drive that stayed in Fault reaction active, and a
+  statusword that changed state on every scan, which kept re-arming the step's timer. Each attempt
+  now has a limit no state change re-arms, `tResetPause` + 2 × `tStateTimeout` + `tStopTimeout`,
+  and a reset past it is the new error 16#8109. A `bQuickStop` held through a reset that ends in
+  an error now gets its 0x0002: the time the drive has to take it no longer runs during the reset.
 - Fixed T9 and a cut quick stop from one bad statusword. A word that decoded for one scan as
   Fault, Switch on disabled, or on a long stop Switched on or Ready to switch on, got 0x0000 on
   that scan, whatever the drive was really doing. The FB now sends 0x0000 for such a word only if

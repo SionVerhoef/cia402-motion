@@ -39,10 +39,12 @@
     bQuickStop      TRUE: quick stop, from any step and over bEnable:
                     0x0002 held (T11: 0x605A decides how the motor stops).
                     One scan is enough. Not an error, and not a safety
-                    function. A fault reset that has begun ends first. The
-                    drive goes to Switch on disabled and stays down until
-                    it is there with bQuickStop and bEnable both FALSE,
-                    through an error or a fault reset too, so that nothing
+                    function. A fault reset that has begun ends first, in
+                    an error if it has to (16#8109), and 0x0002 goes out
+                    then, so up to nResetAttempts limits later. The drive
+                    goes to Switch on disabled and stays down until it is
+                    there with bQuickStop and bEnable both FALSE, through
+                    an error or a fault reset too, so that nothing
                     restarts it but a new bEnable. A drive that does not
                     take 0x0002 in tStateTimeout: 16#8108, and T5.
 
@@ -132,6 +134,7 @@ VAR
     fbStandstill     : TON;
     fbQuickStopTimer : TON;       // the drive has not taken 0x0002
     fbEnableWordOff  : TON;       // no 0x000F can still be on its way
+    fbResetLimit     : TON;       // one attempt of a fault reset, at most
     tStepLimit       : TIME;
     bStepEntered     : BOOL;      // first scan in a new step
     bDriveMoved      : BOOL;      // the decoded state changed this scan
@@ -158,6 +161,7 @@ VAR CONSTANT
     cErrStop        : UDINT := 16#8106;  // did not get down in time
     cErrHomingTime  : UDINT := 16#8107;  // homing did not end in time
     cErrNoQuickStop : UDINT := 16#8108;  // drive did not take 0x0002
+    cErrResetTime   : UDINT := 16#8109;  // fault reset did not end in time
     cErrDriveFault  : UDINT := 16#8110;  // drive in Fault: read 0x603F
     cErrResetFailed : UDINT := 16#8111;  // still in Fault after resets
     cErrQuickStop   : UDINT := 16#8112;  // Quick stop active, not ours
@@ -218,6 +222,11 @@ bAtRest := NOT bDriveMoved
            AND ((eDriveState = E_Cia402State.SwitchOnDisabled)
                 OR (eDriveState = E_Cia402State.NotReadyToSwitchOn));
 
+bResetting := (eStep = E_Cia402Step.ResetLow)
+              OR (eStep = E_Cia402Step.ResetEdge)
+              OR (eStep = E_Cia402Step.ResetRelease)
+              OR (eStep = E_Cia402Step.ResetPause);
+
 // A reset asked for in Error is kept until it can be acted on, so that an
 // edge in Fault reaction active is not lost.
 IF eStep <> E_Cia402Step.Error THEN
@@ -259,20 +268,33 @@ fbStandstill(IN := stConfig.bQuickStopStays
 // A quick stop is kept, through an error or a fault reset too, until the
 // drive is down with bQuickStop and bEnable both FALSE: only a new bEnable
 // restarts the axis. The timer gives the drive tStateTimeout to take 0x0002.
-// It never runs in Quick stop active: that state is the stop ramp.
+// It never runs in Quick stop active: that state is the stop ramp. Nor in a
+// fault reset: 0x0002 has not gone out yet.
 IF bQuickStop THEN
     bQuickStopHeld := TRUE;
 ELSIF bAtRest AND NOT bEnable THEN
     bQuickStopHeld := FALSE;
 END_IF
 fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest
-                       AND (eDriveState <> E_Cia402State.QuickStopActive),
+                       AND (eDriveState <> E_Cia402State.QuickStopActive)
+                       AND NOT bResetting,
                  PT := stConfig.tStateTimeout);
 
 // How long the FB's own words have been without bit 3. It reads no state: a
 // statusword that flips between two states must not re-arm it.
 fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,
                 PT := stConfig.tStateTimeout);
+
+// A fault reset ends, whatever the drive shows: fbStepTimer waits out Fault
+// reaction active with no limit, and a state change re-arms it. This limit is
+// re-armed only by the attempt counted on the way into ResetPause, and the
+// attempts run out. It allows one attempt whole, with its pause, and a fault
+// reaction as long as a stop; the second tStateTimeout is for the scans each
+// step loses, and the statusword's lag.
+fbResetLimit(IN := bResetting
+                   AND NOT (bStepEntered AND (eStep = E_Cia402Step.ResetPause)),
+             PT := stConfig.tResetPause + stConfig.tStateTimeout
+                   + stConfig.tStateTimeout + stConfig.tStopTimeout);
 
 // Homing, statusword bits 13, 12, 10. Bits 12 and 13 both 0 (in progress,
 // or not started) cannot be left over from an earlier run. Outside homing
@@ -286,10 +308,6 @@ END_IF
 // 3. A statusword that decodes to no state is an error in every step; a
 //    fault is one in every step but the reset itself. A quick stop takes
 //    over from every step but Error and the reset, which ends first.
-bResetting := (eStep = E_Cia402Step.ResetLow)
-              OR (eStep = E_Cia402Step.ResetEdge)
-              OR (eStep = E_Cia402Step.ResetRelease)
-              OR (eStep = E_Cia402Step.ResetPause);
 IF eStep <> E_Cia402Step.Error THEN
     IF eDriveState = E_Cia402State.Unknown THEN
         nErrorID := cErrStatusword;
@@ -299,6 +317,9 @@ IF eStep <> E_Cia402Step.Error THEN
                OR (eDriveState = E_Cia402State.FaultReactionActive))
     THEN
         nErrorID := cErrDriveFault;
+        eStep    := E_Cia402Step.Error;
+    ELSIF bResetting AND fbResetLimit.Q THEN
+        nErrorID := cErrResetTime;
         eStep    := E_Cia402Step.Error;
     ELSIF bQuickStopHeld AND NOT bResetting THEN
         eStep := E_Cia402Step.QuickStop;
@@ -484,7 +505,8 @@ CASE eStep OF
         // A drive can leave Fault without this edge: a reset it took late,
         // its own input. Bit 7 is low already, so a state that has lasted
         // the whole step is judged here, and no attempt is counted: none was
-        // made. Fault reaction active is still the fault, and is waited for.
+        // made. Fault reaction active is still the fault: it is waited for,
+        // up to fbResetLimit.
         IF fbStepTimer.Q THEN
             IF eDriveState = E_Cia402State.Fault THEN
                 eStep := E_Cia402Step.ResetEdge;

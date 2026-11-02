@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 sys.path.insert(0, HERE)
 
 import cia402  # noqa: E402
-from st_subset import Program, StError, Struct, Time  # noqa: E402
+from st_subset import Evaluator, Program, StError, Struct, Time  # noqa: E402
 from test_cia402 import model_drive  # noqa: E402
 
 ST_FILE = os.path.join(TEMPLATES, 'FB_Cia402Axis.st')
@@ -60,7 +60,8 @@ ENUM_OF = {
 ERR = {'not_ready': 0x8101, 'shutdown': 0x8102, 'switch_on': 0x8103, 'enable': 0x8104,
        'mode': 0x8105, 'stop': 0x8106, 'homing_time': 0x8107, 'drive_fault': 0x8110,
        'reset_failed': 0x8111, 'quick_stop': 0x8112, 'left_state': 0x8113,
-       'homing': 0x8114, 'statusword': 0x8115, 'no_mode': 0x8120, 'no_quick_stop': 0x8108}
+       'homing': 0x8114, 'statusword': 0x8115, 'no_mode': 0x8120, 'no_quick_stop': 0x8108,
+       'reset_time': 0x8109}
 
 # Short timeouts keep the scenarios to a few hundred scans.
 FAST = {'tStateTimeout': Time(200), 'tStopTimeout': Time(500), 'tHomingTimeout': Time(1000),
@@ -1676,6 +1677,122 @@ class BadStatusword(TemplateCase):
                 self.assertEqual(rig.words[-1], 0x0000)
 
 
+class ResetTimeLimit(TemplateCase):
+    """A fault reset that cannot end ends in an error all the same: every lag, every step."""
+
+    LAGS = (0, 1, 2, 3)
+    WAITING = ('ResetLow', 'ResetPause')
+    STEPS = ('ResetLow', 'ResetEdge', 'ResetRelease', 'ResetPause')
+    LIMIT = 1000  # ms: tResetPause + 2 x tStateTimeout + tStopTimeout in FAST
+    FLIPS = (('fault', SOD), ('fault', 'fault_reaction_active'), ('fault', 'ready_to_switch_on'),
+             (SOD, 'ready_to_switch_on'), ('fault_reaction_active', SOD), ('fault', OE),
+             ('fault', 'quick_stop_active'))
+
+    def flip_until_error(self, rig, flip):
+        """The statusword changes decoded state on every scan; the drive stays in Fault."""
+        words = [STATE_BITS[s] | VOLTAGE | REMOTE for s in flip]
+        for n in range(200):
+            rig.drive.override_sw = words[n % 2]
+            rig.scan()
+            if rig.out['bError']:
+                break
+        rig.drive.override_sw = None
+        return n
+
+    def recovers(self, rig, quick_stop):
+        """The drive reaches Fault: bReset then works, and a quick stop still holds."""
+        rig.drive.fault_persists = False
+        rig.pulse_reset()
+        if quick_stop:
+            rig.until(lambda r: r.drive.state == SOD and not r.out['bBusy'], what='held down')
+            rig.run(20)
+            self.assertFalse(rig.out['bValid'])
+        else:
+            rig.valid()
+        self.assertFalse(rig.out['bError'])
+
+    def test_a_drive_that_stays_in_fault_reaction_active(self):
+        for lag, step, quick_stop in product(self.LAGS, self.WAITING, (None, 'held', 'pulse')):
+            with self.subTest(lag=lag, step=step, quick_stop=quick_stop):
+                rig = self.persistent_fault(lag)
+                self.in_step(rig, step)
+                rig.drive.fra_scans = 10 ** 6
+                rig.drive.fault(persists=True)
+                rig.quick_stop = quick_stop is not None
+                rig.scan()
+                rig.quick_stop = quick_stop == 'held'
+                scans = rig.error(ERR['reset_time'])
+                self.assertLessEqual(scans * CYCLE, self.LIMIT + 10 * CYCLE)
+                rig.run(20)
+                self.assertTrue(rig.out['bError'])
+                self.assertEqual(rig.words[-1], 0x0002 if quick_stop else 0x0000)
+                rig.drive.fra_scans = 0  # the fault reaction ends on the next cycle
+                rig.quick_stop = False
+                rig.run(lag + 5)
+                self.assertEqual(rig.drive.state, 'fault')
+                self.recovers(rig, quick_stop)
+
+    def test_a_statusword_that_changes_state_on_every_scan(self):
+        for lag, step, flip in product(self.LAGS, self.STEPS, self.FLIPS):
+            with self.subTest(lag=lag, step=step, flip=flip):
+                rig = self.persistent_fault(lag)
+                self.in_step(rig, step)
+                scans = self.flip_until_error(rig, flip)
+                self.assertLessEqual(scans * CYCLE, self.LIMIT + 10 * CYCLE)
+                self.assertEqual(rig.out['nErrorID'], ERR['reset_time'])
+                self.assertFalse(rig.words[-1] & 0x80)
+                rig.run(lag + 5)
+                self.recovers(rig, None)
+
+    def test_no_step_restarts_the_limit(self):
+        # Only a counted attempt does: from bReset, the first attempt has one limit.
+        for lag in (0, 1):
+            with self.subTest(lag=lag):
+                rig = self.persistent_fault(lag)
+                mark = len(rig.words)
+                self.in_step(rig, 'ResetRelease')
+                self.flip_until_error(rig, ('fault', SOD))
+                self.assertEqual(rig.out['nErrorID'], ERR['reset_time'])
+                self.assertLessEqual((len(rig.words) - mark) * CYCLE, self.LIMIT + 10 * CYCLE)
+
+    def test_a_quick_stop_held_through_such_a_statusword(self):
+        for lag, step in product(self.LAGS, self.STEPS):
+            with self.subTest(lag=lag, step=step):
+                rig = self.persistent_fault(lag)
+                self.in_step(rig, step)
+                rig.quick_stop = True
+                self.flip_until_error(rig, ('fault', SOD))
+                self.assertEqual(rig.out['nErrorID'], ERR['reset_time'])
+                rig.quick_stop = False
+                rig.run(lag + 5)
+                self.recovers(rig, True)
+
+    def test_the_longest_attempt_is_no_timeout(self):
+        # A fault reaction as long as a stop, then the pause and an edge the drive does not
+        # take. The limit is per attempt: all of them go out, the time they add up to is not
+        # an error.
+        for lag, step, pause in product(self.LAGS, self.WAITING, (100, 600)):
+            with self.subTest(lag=lag, step=step, pause=pause):
+                rig = self.persistent_fault(lag, config={'tResetPause': Time(pause)})
+                mark = len(rig.words)
+                self.in_step(rig, step)
+                rig.drive.fra_scans = 50
+                rig.drive.fault(persists=True)
+                rig.error(ERR['reset_failed'])
+                self.assertEqual(len(rig.edges_of_bit_7(mark)), 3)
+
+    def test_the_limit_ends_with_the_reset(self):
+        # Spent in one reset, it does not cut the next one short.
+        rig = self.persistent_fault()
+        rig.pulse_reset()
+        rig.error(ERR['reset_failed'])
+        rig.run(100)
+        mark = len(rig.words)
+        rig.pulse_reset()
+        rig.error(ERR['reset_failed'])
+        self.assertEqual(len(rig.edges_of_bit_7(mark)), 3)
+
+
 class Errors(TemplateCase):
 
     def test_transitions_the_drive_refuses_time_out(self):
@@ -1758,6 +1875,13 @@ class Interpreter(unittest.TestCase):
     def test_words_wrap(self):
         self.assertEqual(self.run_body('x := 16#FFFF + 2;')['x'], 1)
 
+    def test_time_plus_time(self):
+        self.assertEqual(Evaluator.binary('+', Time(200), Time(30)), Time(230))
+        with self.assertRaises(StError):
+            Evaluator.binary('-', Time(200), Time(30))
+        with self.assertRaises(StError):
+            Evaluator.binary('+', Time(200), 30)
+
     def test_outside_the_subset(self):
         for text in ('WHILE b DO b := FALSE; END_WHILE', 'x := SHL(x, 1);',
                      'FOR x := 1 TO 3 DO END_FOR', '{IF defined(X)} b := TRUE; {END_IF}'):
@@ -1797,8 +1921,8 @@ BROKEN_RULES = {
         CommandedQuickStop, 'test_a_ramp_longer_than_the_stop_timeout_is_no_error'),
     'the ramp of a commanded quick stop timed out': (
         'fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest\n'
-        '                       AND (eDriveState <> E_Cia402State.QuickStopActive),',
-        'fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest,',
+        '                       AND (eDriveState <> E_Cia402State.QuickStopActive)\n',
+        'fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest\n',
         CommandedQuickStop, 'test_a_ramp_longer_than_the_stop_timeout_is_no_error'),
     "the last step's timer taken for the quick stop's": (
         '        ELSIF fbQuickStopTimer.Q THEN',
@@ -2087,6 +2211,44 @@ BROKEN_RULES = {
         '            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n',
         '            ELSE\n',
         FaultReset, 'test_fault_reaction_active_in_the_reset_waits_for_fault'),
+    'a fault reset with no limit': (
+        '    ELSIF bResetting AND fbResetLimit.Q THEN\n'
+        '        nErrorID := cErrResetTime;\n'
+        '        eStep    := E_Cia402Step.Error;\n',
+        '',
+        ResetTimeLimit, 'test_a_drive_that_stays_in_fault_reaction_active'),
+    "the reset's limit re-armed by a state change": (
+        'fbResetLimit(IN := bResetting\n',
+        'fbResetLimit(IN := bResetting AND NOT bDriveMoved\n',
+        ResetTimeLimit, 'test_a_statusword_that_changes_state_on_every_scan'),
+    "the reset's limit not restarted for the next attempt": (
+        '                   AND NOT (bStepEntered AND (eStep = E_Cia402Step.ResetPause)),\n',
+        '                   AND TRUE,\n',
+        ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
+    "the reset's limit left out the fault reaction": (
+        '                   + stConfig.tStateTimeout + stConfig.tStopTimeout);',
+        '                   + stConfig.tStateTimeout);',
+        ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
+    "the reset's limit left no margin for the scans": (
+        '             PT := stConfig.tResetPause + stConfig.tStateTimeout\n',
+        '             PT := stConfig.tResetPause\n',
+        ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
+    "the reset's limit left out the pause": (
+        '             PT := stConfig.tResetPause + stConfig.tStateTimeout\n',
+        '             PT := stConfig.tStateTimeout\n',
+        ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
+    "the reset's limit restarted by every step": (
+        '                   AND NOT (bStepEntered AND (eStep = E_Cia402Step.ResetPause)),\n',
+        '                   AND NOT bStepEntered,\n',
+        ResetTimeLimit, 'test_no_step_restarts_the_limit'),
+    "the fault reset taken for a drive that refuses 0x0002": (
+        '                       AND NOT bResetting,\n',
+        '                       AND TRUE,\n',
+        ResetTimeLimit, 'test_a_drive_that_stays_in_fault_reaction_active'),
+    "the reset's limit kept after the reset": (
+        'fbResetLimit(IN := bResetting\n',
+        'fbResetLimit(IN := (bResetting OR bError)\n',
+        ResetTimeLimit, 'test_the_limit_ends_with_the_reset'),
 }
 
 
