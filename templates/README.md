@@ -287,8 +287,8 @@ compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. 
 - quick stops asked for: a ramp longer than `tStopTimeout`, a drive that refuses T11, a fault
   or a bad statusword during the stop and while held down, and `bQuickStop`, held and as a
   pulse, at every scan of the way up, of the way down and of a fault reset;
-- fault resets that work, ones that fail three times, a level `bReset`, and an acknowledge
-  given in Fault reaction active;
+- fault resets that work, ones that fail three times, a level `bReset`, an acknowledge given in
+  Fault reaction active, and a drive that leaves Fault by itself before or between the attempts;
 - mode switches, including during T4 and in the middle of homing;
 - homing, including a result and an error left over from an earlier run;
 - the error paths.
