@@ -41,6 +41,17 @@
   ignores controlword bit 2 therefore still gets down, but a way down waits that long.
 - A way down can now end in Quick stop active: on a drive with 0x605A 5–8, set `bQuickStopStays`
   even if `bQuickStop` is never used.
+- Fixed a false 16#8113 when `bEnable` bounced on the way up. Falling while 0x0006 or 0x0007 was
+  still on its way and rising again, it restarted on a Switch on disabled older than that word,
+  then read the late states in the wrong order. A new `bEnable` now waits until the drive shows a
+  new state, or for `tStateTimeout`. A restart after a whole way down is not slowed.
+- Fixed a fault reset spent by one bad statusword. A word that showed another state on the scan
+  after 0x0080 went out ended the edge there: a drive that needs a steady word never took it,
+  stayed in Fault and cost an attempt. The edge is now held unless the next scan shows that
+  state too; bit 7 still goes only to a drive seen in Fault.
+- Tests: the simulated drive's position checks allow its jitter when the statusword is late,
+  where the FB cannot know the position better. At lag 0 they stay exact, and a stale target is
+  still caught.
 
 **References**
 

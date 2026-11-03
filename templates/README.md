@@ -275,16 +275,22 @@ violation when the FB:
   mode's set-point was safe;
 - steps a set-point the enabled drive is following.
 
+The position checks allow the drive's position jitter when the statusword is late: the FB
+cannot know the position better than the one it last read. At lag 0 they are exact.
+
 The scenarios cover enabling from every state and the way down from every state, both
 compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. They also cover:
 
 - `bEnable` dropped at every scan of the way up, and raised again at every scan of the way down;
+  `bEnable` bouncing on the way up, on drives that need a steady word for up to three scans;
 - a drive that drops out while 0x000F or 0x001F is going out, running, homing or in a mode
   switch, and a drive that ignores controlword bit 2;
 - one scan of a statusword that shows Fault, Fault reaction active or Switch on disabled, while
   running and as 0x000F goes out; those and Switched on and Ready to switch on, in a stop or a
   quick stop longer than `tStateTimeout`; `bEnable` or `bReset` rising on that scan; a pulsed
-  `bQuickStop` held through it; and a Fault word that lasts;
+  `bQuickStop` held through it; one on the scan after the reset edge; and a Fault word that
+  lasts;
+- mode switches with position jitter, at every lag;
 - quick stops that end by themselves, ones that stay, and one without 0x6064;
 - quick stops asked for: a ramp longer than `tStopTimeout`, a drive that refuses T11, a fault
   or a bad statusword during the stop and while held down, and `bQuickStop`, held and as a

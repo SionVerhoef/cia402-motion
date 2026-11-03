@@ -212,16 +212,23 @@ class SimDrive:
         if state == OE and not valid:
             for key, value in (('target', target), ('velocity', velocity),
                                ('torque', torque)):
-                if self.display in FOLLOWED[key] and value != last[key]:
+                stepped = (not self._near(value, last[key]) if key == 'target'
+                           else value != last[key])
+                if self.display in FOLLOWED[key] and stepped:
                     self.violation(f'{key} stepped from {last[key]} to {value} by the FB '
                                    f'while the drive followed it')
 
-    @staticmethod
-    def _was_safe_for(mode, last):
+    def _near(self, target, position):
+        """Equal, give or take the position jitter when the FB reads late: its position is
+        `lag` scans old, and this one may have moved by the jitter since. At lag 0 it reads
+        this one, and must match it."""
+        return abs(target - position) <= (self.jitter if self.lag else 0)
+
+    def _was_safe_for(self, mode, last):
         if last['cw'] & MODE_BITS:
             return False
         if mode in POSITION:
-            return last['target'] == last['position']
+            return self._near(last['target'], last['position'])
         if mode in VELOCITY:
             return last['velocity'] == 0
         if mode in TORQUE:
@@ -240,7 +247,7 @@ class SimDrive:
         self._setpoint_safe(self.display, target, velocity, torque, 'on enable')
 
     def _setpoint_safe(self, mode, target, velocity, torque, when):
-        if mode == 8 and target != self.position:
+        if mode == 8 and not self._near(target, self.position):
             self.violation(f'CSP jump {when}: target {target}, actual {self.position}')
         if mode in VELOCITY and velocity:
             self.violation(f'velocity {velocity} {when}')
@@ -544,6 +551,35 @@ class Enabling(TemplateCase):
         rig = self.make()
         rig.enable = True
         rig.error(ERR['no_mode'])
+
+    def test_enable_that_bounces_on_the_way_up(self):
+        # bEnable falls while 0x0006 or 0x0007 may still be on its way and rises again. The
+        # Switch on disabled the FB sees then can be older than that word: restarting on it
+        # read the late states in the wrong order, a false 16#8113.
+        for lag, settle, at, off in product((0, 1, 2, 3), (1, 2, 3), range(6), (1, 2, 3)):
+            with self.subTest(lag=lag, settle=settle, at=at, off=off):
+                rig = self.make(lag=lag, settle=settle)
+                rig.mode = 8
+                rig.run(3)
+                rig.enable = True
+                rig.run(at + 1)
+                rig.enable = False
+                rig.run(off)
+                rig.enable = True
+                rig.until(lambda r: r.out['bValid'] or r.out['bError'], what='an end')
+                self.assertTrue(rig.out['bValid'], hex(rig.out['nErrorID']))
+
+    def test_bounce_on_a_drive_that_never_takes_t2(self):
+        # The wait ends after tStateTimeout: the next T2 times out as on any such drive.
+        for lag in (0, 2):
+            with self.subTest(lag=lag):
+                rig = self.make(lag=lag, refuse=('ready_to_switch_on',))
+                rig.mode, rig.enable = 8, True
+                rig.scan()
+                rig.enable = False
+                rig.scan()
+                rig.enable = True
+                rig.error(ERR['shutdown'])
 
 
 class Disabling(TemplateCase):
@@ -1301,6 +1337,31 @@ class Latency(TemplateCase):
                     rig.at_rest()
 
 
+class Jitter(TemplateCase):
+    """A position that is never still, read `lag` scans late. The FB sets a target from the
+    position it reads; the drive judges it against its own, which has moved by up to the
+    jitter since. That much is noise, and the drive's checks allow it."""
+
+    def test_mode_switches_with_jitter_and_lag(self):
+        for jitter, lag, (a, b) in product((1, 5), (0, 1, 2, 3),
+                                           ((8, 1), (1, 8), (8, 9), (9, 8), (8, 6), (1, 10))):
+            with self.subTest(jitter=jitter, lag=lag, switch=(a, b)):
+                rig = self.running(mode=a, lag=lag, jitter=jitter)
+                rig.run(5)
+                rig.mode = b
+                rig.valid()
+                rig.run(5)
+
+    def test_a_stale_target_is_still_a_jump(self):
+        # More than the jitter: the check still catches a target left behind.
+        for lag in (0, 2):
+            with self.subTest(lag=lag):
+                rig = self.make(lag=lag, jitter=3, position=1000)
+                rig.io['nTargetPosition'] = 0
+                rig.enable, rig.mode = True, 8
+                rig.valid()
+
+
 class StaleWordOnTheWayDown(TemplateCase):
     """The drive drops out while 0x000F is still going out, so that it is back in Operation
     enabled when a late statusword shows the state it dropped to. Every word sent there has
@@ -1655,7 +1716,29 @@ class BadStatusword(TemplateCase):
                 for _ in range(scans):
                     self.bad_scan(rig, word)
                 rig.error(ERR['reset_failed'])
-                self.assertEqual(len(rig.edges_of_bit_7(mark)), attempts)
+                # 16#8111 comes after exactly `attempts`; each had its edge. A late word that
+                # lands on the edge itself gives that attempt a second one: 0x0000 for the
+                # bad scan, then 0x0080 again, never bit 7 to a drive not seen in Fault.
+                self.assertEqual(rig.fb['nResetCount'], attempts)
+                self.assertGreaterEqual(len(rig.edges_of_bit_7(mark)), attempts)
+                self.assertLessEqual(len(rig.edges_of_bit_7(mark)), attempts + 1)
+
+    def test_on_the_edge_it_spends_no_attempt(self):
+        # The scan after 0x0080 goes out. On a drive that needs a steady word, leaving the
+        # step there cut the edge short: the drive stayed in Fault and the one attempt was
+        # spent. The word is set at the FB's input, so that it lands on that scan at any lag.
+        for lag, word, settle in product(self.LAGS, self.AT_REST + self.DOWN, (1, 2, 3)):
+            with self.subTest(lag=lag, word=hex(word), settle=settle):
+                rig = self.running(lag=lag, settle=settle, config={'nResetAttempts': 1})
+                rig.drive.fault()
+                rig.error(ERR['drive_fault'])
+                rig.run(10)
+                self.in_step(rig, 'ResetEdge')
+                rig.always = lambda r, w=word: r.io.__setitem__('nStatusword', w)
+                rig.scan()
+                rig.always = None
+                rig.valid()
+                self.assertEqual(rig.fb['nResetCount'], 0)
 
     def test_a_word_that_stays_in_fault(self):
         # No 0x0000 from there until a reset: the README says what a reset does then.
@@ -1899,6 +1982,18 @@ class Interpreter(unittest.TestCase):
 # One edit per rule, each breaking it in the template's text, and the scenario that
 # must then fail. The edit must match the template exactly once.
 BROKEN_RULES = {
+    'restart on a Switch on disabled older than T2 or T3': (
+        'ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut\n',
+        'ELSIF bEnable AND NOT bDriveMoved\n',
+        Enabling, 'test_enable_that_bounces_on_the_way_up'),
+    'one bad word cuts the reset edge short': (
+        'IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)\n',
+        'IF (eDriveState <> E_Cia402State.Fault)\n',
+        BadStatusword, 'test_on_the_edge_it_spends_no_attempt'),
+    'CSP target not held at actual before enable, with jitter': (
+        '    stDrive.nTargetPosition := stDrive.nPositionActual;\n    stDrive.nTargetVelocity',
+        '    ;\n    stDrive.nTargetVelocity',
+        Jitter, 'test_a_stale_target_is_still_a_jump'),
     'quick stop cut with 0x0000': (
         'stDrive.nControlword := 16#0002;   // let it finish',
         'stDrive.nControlword := 16#0000;   // let it finish',
@@ -1981,8 +2076,9 @@ BROKEN_RULES = {
         'stDrive.nControlword := 16#000F;   // T2',
         Enabling, 'test_from_each_state_as_the_planner_says'),
     'bit 7 never released': (
-        'IF (eDriveState <> E_Cia402State.Fault) OR fbStepTimer.Q THEN',
-        'IF eDriveState <> E_Cia402State.Fault THEN',
+        'IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)\n'
+        '           OR fbStepTimer.Q\n',
+        'IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)\n',
         FaultReset, 'test_failed_resets_release_bit_7_every_time'),
     'bit 7 with the enable bits': (
         '            stDrive.nControlword := 16#0080;\n',
@@ -2140,8 +2236,8 @@ BROKEN_RULES = {
         'bAtRest := TRUE\n           AND ((eDriveState',
         BadStatusword, 'test_in_a_quick_stop_longer_than_tstatetimeout'),
     'one scan of at rest starts T2': (
-        'ELSIF bEnable AND NOT bDriveMoved\n',
-        'ELSIF bEnable\n',
+        'ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut\n',
+        'ELSIF bEnable AND NOT bUpWordOut\n',
         BadStatusword, 'test_enable_raised_on_the_scan'),
     'one scan of at rest releases a quick stop': (
         'bAtRest := NOT bDriveMoved\n           AND ((eDriveState',
