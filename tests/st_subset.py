@@ -585,6 +585,8 @@ class Evaluator:
                     '<=': a <= b, '>=': a >= b}[op]
         elif isinstance(a, Time) and isinstance(b, Time) and op in ('<', '>', '<=', '>='):
             return Evaluator.binary(op, a.ms, b.ms)
+        elif isinstance(a, Time) and isinstance(b, Time) and op == '+':
+            return Time(a.ms + b.ms)
         raise StError(f'{a!r} {op} {b!r}: not allowed on these types')
 
 

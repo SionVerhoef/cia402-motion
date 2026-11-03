@@ -82,6 +82,7 @@ FALSE: watch `eDriveState`.
 | 16#8106 | A step of the way down did not end in `tStopTimeout` |
 | 16#8107 | Homing did not end in `tHomingTimeout` |
 | 16#8108 | `bQuickStop`: the drive did not take 0x0002 in `tStateTimeout`. The FB goes on with T5 |
+| 16#8109 | A fault reset did not end in time, and this replaces 16#8110: the drive may still be in Fault, read 0x603F. It stayed in Fault reaction active longer than `tStopTimeout`, or its statusword kept changing state, which points at the bus or the copy of the inputs. Each attempt has `tResetPause` + 2 × `tStateTimeout` + `tStopTimeout` |
 | 16#8110 | The drive is in Fault: read 0x603F |
 | 16#8111 | Still in Fault after `nResetAttempts` resets: the cause is still there |
 | 16#8112 | Quick stop active, not asked for with `bQuickStop` |
@@ -94,7 +95,8 @@ FALSE: watch `eDriveState`.
 
 **Asking for one.** `bQuickStop` TRUE sends 0x0002 on the same scan and holds it, over
 `bEnable`, from any step; one scan of it is enough. Only a fault reset that has begun runs to
-its end first. In Operation enabled the word is T11, and 0x605A decides how the motor stops: the
+its end first, which can take up to `nResetAttempts` times the limit in 16#8109 with 0x0000
+going out. In Operation enabled the word is T11, and 0x605A decides how the motor stops: the
 FB does not write it, and what a drive offers differs by vendor
 (`../references/state-machine.md`). From Ready to switch on or Switched on the drive goes
 straight to Switch on disabled, and a T4 still on its way meets T11, never T9. `bValid` falls at
@@ -289,6 +291,9 @@ compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. 
   pulse, at every scan of the way up, of the way down and of a fault reset;
 - fault resets that work, ones that fail three times, a level `bReset`, an acknowledge given in
   Fault reaction active, and a drive that leaves Fault by itself before or between the attempts;
+- fault resets that cannot end: a drive that stays in Fault reaction active, and a statusword that
+  changes state on every scan, with and without a quick stop, and the longest attempt that is
+  not one of these;
 - mode switches, including during T4 and in the middle of homing;
 - homing, including a result and an error left over from an earlier run;
 - the error paths.
