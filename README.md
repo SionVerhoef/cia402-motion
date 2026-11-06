@@ -120,10 +120,12 @@ on this page.
 - **The tests pass on Linux and Windows, and on Python 3.8.**
 - **Agent behaviour in A/B evals** on Opus 5.5 and Haiku 5.5, and the safety refusal on Haiku
   4.5 as well: see above and [`evals/results-ab.md`](evals/results-ab.md).
-- **The description fires on CiA 402 questions, not on their neighbours.** In trigger evals on
-  Opus 5.5 it fired in 38 of 39 runs of queries it should take and in 2 of 33 runs of
-  near-misses (EtherCAT faults, ESI files, PROFIdrive, plain Structured Text), both on a TwinCAT
-  NC axis question that sits on the boundary: [`evals/README.md`](evals/README.md#trigger-evals).
+- **The description fires on CiA 402 questions, not on their neighbours.** In trigger evals it
+  fired in 39 of 39 runs of queries it should take on Opus 5.5 and 37 of 39 on Haiku 5.5, and
+  in 2 of 33 runs of near-misses (EtherCAT faults, ESI files, PROFIdrive, safety logic, plain
+  Structured Text) on Opus and none on Haiku. Both misfires were on a TwinCAT NC axis question
+  that sits on the boundary. The earlier description fired in only 11 of 39 on Haiku:
+  [`evals/README.md`](evals/README.md#trigger-evals).
 
 **Not verified**
 

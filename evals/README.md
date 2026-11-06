@@ -77,3 +77,22 @@ the description, the user-units query fired in only 1 of 3 runs, so the descript
 fired 1 of 3 in the first run. That query is a real borderline: `MC_Power.Status` never going
 TRUE is where twincat-motion hands a drive that will not enable to this skill, and twincat-motion
 was not installed to compete. Nothing else fired in either run.
+
+**Haiku 5.5, and the description that followed** (2026-11-06, three runs per query, three
+workers). With the description above, Haiku 5.5 took the skill in only 11 of the 39 runs it
+should have, and none of the near-misses: it answered from its own knowledge, which is where the
+A/B evals found it wrong. A description that begins "Load before answering any question about a
+CiA 402 / DS402 … drive" and says why (vendors depart from the profile in ways that look
+standard) fired in 38 of 39 on Haiku, but on Opus it also took a TwinSAFE logic query 3 of 3,
+the AX5000/SoE query 1 of 3 and the NC axis query 2 of 3. Naming SERCOS/SoE drives and safety
+PLC logic under "Not for" gave the description now in `SKILL.md`:
+
+| Description | Haiku 5.5 should / near-miss | Opus 5.5 should / near-miss |
+|---|---|---|
+| v0.1 ("Use for the CiA 402 …") | 11/39 · 0/33 | 38/39 · 2/33 |
+| "Load before answering …" | 38/39 · 0/33 | 39/39 · 6/33 |
+| the same, with SoE and safety PLC logic excluded | 37/39 · 0/33 | 39/39 · 2/33 |
+
+The two exclusions were written after those near-misses fired, so the near-miss score of the
+last row is measured on the queries it was tuned to. New near-misses would confirm it. Its
+Opus misfires are again the NC axis query only.
