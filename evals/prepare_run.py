@@ -37,6 +37,15 @@ ARM_INSTRUCTION = {
         "under references/, scripts/ or templates/ - this run is the baseline it is "
         "measured against."
     ),
+    # A user's agent without the skill can still search. Not the skill itself, though: it
+    # is public, and finding it would measure the skill again, not the baseline.
+    "web_baseline": (
+        "Answer the request below. You may search the web and fetch pages, as an agent "
+        "helping an engineer could. Do NOT read {skill}, anything under references/, "
+        "scripts/ or templates/, or the cia402-motion skill on GitHub "
+        "(github.com/SionVerhoef/cia402-motion) or any copy of it - this run is a "
+        "baseline it is measured against."
+    ),
 }
 
 CELL_TEMPLATE = """# {eval_name} / {arm} / {rep}
@@ -60,10 +69,19 @@ def main():
     p.add_argument("--reps", type=int, default=3)
     p.add_argument("--skill", type=Path, default=ROOT / "SKILL.md")
     p.add_argument("--spec", type=Path, default=HERE / "evals.json")
+    p.add_argument("--arms", default="", help="comma-separated arms, over the spec's own")
+    p.add_argument("--only", default="", help="comma-separated eval names")
     a = p.parse_args()
 
     spec = json.loads(a.spec.read_text(encoding="utf-8"))
-    arms = spec.get("run", {}).get("arms", ["with_skill", "without_skill"])
+    arms = ([x for x in a.arms.split(",") if x]
+            or spec.get("run", {}).get("arms", ["with_skill", "without_skill"]))
+    unknown = set(arms) - set(ARM_INSTRUCTION)
+    if unknown:
+        p.error(f"unknown arm(s): {', '.join(sorted(unknown))}")
+    only = {x for x in a.only.split(",") if x}
+    if only:
+        spec["evals"] = [ev for ev in spec["evals"] if ev["name"] in only]
     skill = str(a.skill.resolve())
     manifest = []
     for ev in spec["evals"]:

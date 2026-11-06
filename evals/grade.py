@@ -500,7 +500,8 @@ def main() -> int:
         table.setdefault(m["eval"], {}).setdefault(m["arm"], []).append(final)
     (run / "GRADES.json").write_text(json.dumps(out, indent=2) + "\n")
 
-    arms = ("with_skill", "without_skill")
+    present = {a for row in table.values() for a in row}
+    arms = tuple(a for a in ("with_skill", "without_skill", "web_baseline") if a in present)
     print(f"{'eval':26s} " + " ".join(f"{a:>16s}" for a in arms))
     totals = {a: [] for a in arms}
     for name in GRADERS:

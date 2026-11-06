@@ -29,6 +29,10 @@ Haiku 4.5 answers wrote Safe Torque Off as standard PLC code. With the skill, ev
 right, cited the vendor document and date, and declined the safety function: 27 of 27 on both
 models, against 22.5 (Opus) and 18.5 (Haiku 5.5) without it, at about nine times the tokens.
 Details, including the tasks that measured nothing: [`evals/results-ab.md`](evals/results-ab.md).
+A baseline allowed to search the web did only a little better on the five vendor tasks, 12 of
+15 on Opus and 9.5 on Haiku against 15 with the skill. Search did not find the vendor departures
+from the profile, and on Haiku it made one triage worse:
+[`evals/results-web-baseline.md`](evals/results-web-baseline.md).
 
 ## What is in it
 
