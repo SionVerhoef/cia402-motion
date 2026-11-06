@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Skill**
+
+- New description: it now begins "Load before answering any question about a CiA 402 / DS402 …
+  drive" and says why. The old one made Haiku 5.5 load the skill in only 11 of 39 trigger runs
+  it should take; the new one in 37 of 39, and Opus 5.5 in 39 of 39. SERCOS/SoE drives and safety
+  PLC logic are now named under "Not for", which keeps the near-misses at 2 of 33 on Opus and none
+  on Haiku. See `evals/README.md`, Trigger evals.
+
 **Templates**
 
 - `FB_Cia402Axis`: a `bQuickStop` input and a `QuickStop` step, so that a process stop no longer
