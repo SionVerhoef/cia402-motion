@@ -130,7 +130,10 @@ FUNCTION_BLOCK FB_Cia402Axis
       leads to, with a timeout. On the way up, any other state is an
       error. If bEnable falls while T4 may still be on its way, the FB
       sends 0x0007 and waits, so that a late T4 is stopped with T5. Only a
-      quick stop cuts in: 0x0002 cannot be T9, whatever is on its way.
+      quick stop cuts in: 0x0002 cannot be T9, whatever is on its way. If
+      it falls while T2 or T3 may be, a new bEnable waits until the drive
+      shows a new state, or for tStateTimeout: the Switch on disabled the
+      FB sees may be older than the word.
     - Fault reset only from Fault: an edge on bit 7, released after every
       attempt, failed ones included. Never bit 7 with the enable bits.
     - Quick stop active is left only when the drive leaves it itself, or,
@@ -205,6 +208,7 @@ VAR
     fbQuickStopTimer : TON;       // the drive has not taken 0x0002
     fbEnableWordOff  : TON;       // no 0x000F can still be on its way
     fbResetLimit     : TON;       // one attempt of a fault reset, at most
+    fbUpWordOut      : TON;       // T2 or T3 can no longer come
     tStepLimit       : TIME;
     bStepEntered     : BOOL;      // first scan in a new step
     bDriveMoved      : BOOL;      // the decoded state changed this scan
@@ -216,6 +220,7 @@ VAR
     bHomingRunSeen   : BOOL;      // bits 12, 13 both 0 since bit 4
     bResetting       : BOOL;      // in one of the fault-reset steps
     bResetRequest    : BOOL;      // bReset rose while in Error
+    bUpWordOut       : BOOL;      // T2 or T3 sent, not yet seen taken
     bSetModeLastScan : BOOL;      // last scan's outputs were SetMode's
     bRunningLastScan : BOOL;      // last scan's outputs were Running's
     nResetCount      : UINT;
@@ -364,6 +369,14 @@ fbResetLimit(IN := bResetting
              PT := stConfig.tResetPause + stConfig.tStateTimeout
                    + stConfig.tStateTimeout + stConfig.tStopTimeout);
 
+// A 0x0006 or 0x0007 left behind when bEnable fell has been taken, or
+// ignored, once the drive shows a new state, or after tStateTimeout. Until
+// then the Switch on disabled the FB sees may be older than that word.
+fbUpWordOut(IN := bUpWordOut, PT := stConfig.tStateTimeout);
+IF bDriveMoved OR fbUpWordOut.Q THEN
+    bUpWordOut := FALSE;
+END_IF
+
 // Homing, statusword bits 13, 12, 10. Bits 12 and 13 both 0 (in progress,
 // or not started) cannot be left over from an earlier run. Outside homing
 // this follows the latest phase; in it, it latches.
@@ -409,7 +422,7 @@ CASE eStep OF
               AND eDriveState = E_Cia402State.NotReadyToSwitchOn
         THEN
             eStep := E_Cia402Step.WaitReady;
-        ELSIF bEnable AND NOT bDriveMoved
+        ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut
               AND eDriveState = E_Cia402State.SwitchOnDisabled
         THEN
             eStep := E_Cia402Step.Shutdown;
@@ -437,7 +450,8 @@ CASE eStep OF
 
     E_Cia402Step.Shutdown:
         IF NOT bEnable THEN
-            eStep := E_Cia402Step.Disabled;
+            bUpWordOut := TRUE;
+            eStep      := E_Cia402Step.Disabled;
         ELSIF eDriveState = E_Cia402State.ReadyToSwitchOn THEN
             eStep := E_Cia402Step.SwitchOn;
         ELSIF eDriveState <> E_Cia402State.SwitchOnDisabled THEN
@@ -450,7 +464,8 @@ CASE eStep OF
 
     E_Cia402Step.SwitchOn:
         IF NOT bEnable THEN
-            eStep := E_Cia402Step.Disabled;
+            bUpWordOut := TRUE;
+            eStep      := E_Cia402Step.Disabled;
         ELSIF eDriveState = E_Cia402State.SwitchedOn THEN
             eStep := E_Cia402Step.SetMode;
         ELSIF eDriveState <> E_Cia402State.ReadyToSwitchOn THEN
@@ -589,8 +604,11 @@ CASE eStep OF
 
     E_Cia402Step.ResetEdge:
         // Hold the edge until the drive leaves Fault or the timeout, then
-        // release bit 7 either way.
-        IF (eDriveState <> E_Cia402State.Fault) OR fbStepTimer.Q THEN
+        // release bit 7 either way. A state seen for one scan may be a bad
+        // word: the step stays, so that the drive still gets its edge.
+        IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)
+           OR fbStepTimer.Q
+        THEN
             eStep := E_Cia402Step.ResetRelease;
         END_IF
 
