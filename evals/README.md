@@ -24,6 +24,11 @@ The baseline arm is told not to read the skill and gets the Write tool only, so 
 looking for this repository, which is public. It is not otherwise handicapped, and the prompt
 tells it the subject. Telling it nothing would measure prompt luck instead.
 
+`--arms web_baseline` adds a third arm with WebSearch and WebFetch, as a user's agent could
+have. It is told to stay off this repository, and the report flags any request or tool result
+that names `cia402-motion`. Results: `results-web-baseline.md`. Run one model at a time: two
+runs side by side once corrupted the shared Claude Code config file.
+
 ## The sets
 
 - `candidates.json`: the scouting set, 14 tasks asked without the skill to find where a model

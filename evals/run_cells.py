@@ -27,7 +27,10 @@ otherwise:
     with evals/ removed, so neither arm can read the expected answers.
   * The baseline gets the Write tool only. It answers from its own knowledge, and
     without Read or a shell it cannot reach this repository, which is public. (The
-    scouting round also allowed Bash; no cell used it.) The with_skill arm needs Read
+    scouting round also allowed Bash; no cell used it.) The web_baseline arm adds
+    WebSearch and WebFetch, as a user's agent could have; it is told to stay off the
+    skill's public repository, and a request or a tool result that names it is flagged
+    (--arms web_baseline). The with_skill arm needs Read
     and Bash, so it is audited instead: a Read, Glob or Grep outside its cell and the
     snapshot is flagged, and its shell commands are listed in the report to be read.
   * --parallel defaults to 3. Four concurrent sessions once produced a transiently
@@ -53,9 +56,32 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 CELL_TIMEOUT = 1800
-TOOLS = {"with_skill": "Read Write Edit Glob Grep Bash", "without_skill": "Write"}
+TOOLS = {"with_skill": "Read Write Edit Glob Grep Bash", "without_skill": "Write",
+         "web_baseline": "Write WebSearch WebFetch"}
 DENIED = ("WebFetch WebSearch Agent Task PushNotification Workflow ScheduleWakeup "
           "CronCreate RemoteTrigger SendMessage DesignSync")
+# The skill is public. A web baseline that reaches it is measuring the skill again.
+SKILL_REPO = re.compile(r"cia402-motion", re.I)
+
+
+def denied(arm: str) -> str:
+    return " ".join(t for t in DENIED.split() if t not in TOOLS[arm].split())
+
+
+def tool_results_text(jsonl: Path) -> str:
+    """Everything the tools handed back to the session, as one string."""
+    parts = []
+    for line in jsonl.read_text(errors="replace").splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if m.get("type") != "user":
+            continue
+        for b in m.get("message", {}).get("content", []):
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                parts.append(json.dumps(b.get("content", "")))
+    return "\n".join(parts)
 
 
 def inside_git(path: Path) -> bool:
@@ -110,7 +136,7 @@ def run_cell(cell: Path, model: str, skill: Path) -> dict:
            "--model", model, "--safe-mode", "--setting-sources", "",
            "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
            "--tools", *TOOLS[arm].split(), "--permission-mode", "dontAsk",
-           "--allowedTools", TOOLS[arm], "--disallowedTools", DENIED,
+           "--allowedTools", TOOLS[arm], "--disallowedTools", denied(arm),
            "--output-format", "stream-json", "--verbose"]
     if arm == "with_skill":
         cmd += ["--add-dir", str(skill)]
@@ -215,6 +241,14 @@ def report(run: Path, skill: Path) -> str:
         flags = []
         if arm == "without_skill" and any(name != "Write" for name, _ in calls):
             flags.append("BASELINE-USED-TOOLS")
+        if arm == "web_baseline":
+            if any(name not in TOOLS[arm].split() for name, _ in calls):
+                flags.append("BASELINE-USED-TOOLS")
+            if any(SKILL_REPO.search(json.dumps(inp))
+                   for name, inp in calls if name in ("WebFetch", "WebSearch")):
+                flags.append("ASKED-FOR-THE-SKILL")
+            if SKILL_REPO.search(tool_results_text(cell / "run.jsonl")):
+                flags.append("SKILL-IN-RESULTS")
         if arm == "with_skill":
             if not any(name == "Read" and inp.get("file_path", "").endswith("SKILL.md")
                        or name == "Bash" and "SKILL.md" in inp.get("command", "")
@@ -246,7 +280,7 @@ def report(run: Path, skill: Path) -> str:
     lines.append("")
     if not_run:
         lines.append(f"{not_run} cells in the manifest were not run")
-    for arm in ("with_skill", "without_skill"):
+    for arm in TOOLS:
         a = [r for r in rows if r["arm"] == arm]
         if a:
             lines.append(f"{arm:13s} n={len(a)} mean tok={statistics.mean(r['tok'] for r in a):,.0f} "
@@ -295,7 +329,8 @@ def main() -> int:
         if not (run / "MANIFEST.json").exists():
             subprocess.run([sys.executable, str(HERE / "prepare_run.py"), str(run),
                             "--reps", str(a.reps), "--skill", str(skill / "SKILL.md"),
-                            "--spec", str(spec)], check=True)
+                            "--spec", str(spec), "--arms", a.arms, "--only", a.only],
+                           check=True)
         manifest = json.loads((run / "MANIFEST.json").read_text())
         only = {x for x in a.only.split(",") if x}
         arms = {x for x in a.arms.split(",") if x}
