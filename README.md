@@ -15,7 +15,7 @@ drive won't reach Operation Enabled.
 > speed limits, and verify on the real machine before anyone stands near it. Responsibility
 > for the machine stays with whoever commissions it.
 
-**Status: v0.1.0.** Built from the profile as vendor manuals and permissive implementations
+**Status: v0.2.0.** Built from the profile as vendor manuals and permissive implementations
 restate it, and from the vendor documents named on each vendor page. Tested against
 independent models and in A/B evals; **never run against a real drive**. What is verified and
 what is not: [Status](#status).
@@ -59,7 +59,7 @@ git submodule add https://github.com/SionVerhoef/cia402-motion .claude/skills/ci
 Pin a release rather than following `main`, and commit the pin:
 
 ```bash
-git -C .claude/skills/cia402-motion checkout v0.1.0
+git -C .claude/skills/cia402-motion checkout v0.2.0
 git add .claude/skills/cia402-motion
 ```
 

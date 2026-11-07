@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-07
+
+`FB_Cia402Axis` gets a quick-stop input and loses the hangs and false errors found in its fault
+reset, its way down and its reaction to a single bad statusword. The description now loads on
+Haiku 5.5. Still never run against a real drive (README, *Status*).
 
 **Skill**
 
@@ -69,6 +73,13 @@
   fail.
 - `cia402.py plan` keeps 0x0000 for T7 and T10, right for a caller with no word with bit 3 in the
   drive or on its way, and adds a note pointing to rule 9.
+
+**Evals**
+
+- A web-search baseline arm (`run_cells.py --arms web_baseline`): the baseline gets WebSearch
+  and WebFetch, is told to stay off this repository, and any request or result naming it is
+  flagged. On the five vendor, porting and triage tasks it scored 12 of 15 on Opus 5.5 and 9.5
+  on Haiku 5.5, against 15 with the skill. See `evals/results-web-baseline.md`.
 
 ## 0.1.0 — 2026-10-29
 
