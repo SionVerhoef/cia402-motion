@@ -37,7 +37,7 @@ whether the drive then moves to the new zero. Check the drive's manual, then hom
 Neighbouring numbers differ in which edge of the switch counts and from which side it is
 approached. Check the method diagram in the drive manual against the real switch, wired
 polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4
-and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, and Synapticon takes both (vendor pages). Many
+and SEW MOVI-C take only 37, Nanotec's CL3-E and Kollmorgen's AKD document only 35, and Synapticon takes both (vendor pages). Many
 drives support only some of the standard methods.
 
 **No standard method homes on a hard stop.** Homing against a mechanical end stop (by current
@@ -47,7 +47,7 @@ by the master.
 ## Negative methods are not portable
 
 The same negative number means different things on different drives, sometimes with the
-direction reversed. As read 2026-10-26 (Rexroth and Lenze 2026-11-08):
+direction reversed. As read 2026-10-26 (Rexroth, Lenze and Kollmorgen 2026-11-08):
 
 | Source | −1 | −2 | −3 | −4 | Other negatives |
 |---|---|---|---|---|---|
@@ -57,6 +57,7 @@ direction reversed. As read 2026-10-26 (Rexroth and Lenze 2026-11-08):
 | LinMot (`vendors/linmot.md`) | — | — | — | — | only −128 to −111, its own list |
 | Rexroth ctrlX DRIVE (`vendors/rexroth.md`) | no preset method: sequence built in 0x2500:02 | — | — | — | none |
 | Lenze i950, "CiA 402 advanced" (`vendors/lenze.md`) | end stop by torque, **negative**, no index | end stop by torque, positive, no index | — | — | none |
+| Kollmorgen AKD fw 1.17 (`vendors/kollmorgen.md`) | reserved | reserved | reference switch, fast then slow, negative | the same, positive (manual gives `HOME.DIR` = 0 for both) | −5: set home here and store in NVRAM; −6/−7: home input positive/negative, then next feedback zero |
 | python-canopen 2.4.1 names (a library, not a drive) | mechanical limit negative + index | mechanical limit positive + index | negative | positive | −5 to −8: following error |
 
 **Never carry a negative method number from one drive to another.** Look up what the old
