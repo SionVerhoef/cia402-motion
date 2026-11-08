@@ -20,6 +20,11 @@ here, then look the full code up in the drive manual.
 | 0x9xxx | external error |
 | 0xFFxx | device-specific |
 
+**Not every drive puts a CiA 301 code here.** The Beckhoff AX8000 puts the text ID of its last
+error diagnosis message in 0x603F, to be looked up in Beckhoff's diagnosis message list; read
+as a class, it means nothing (`vendors/beckhoff.md`). If a code fits no class, or the vendor
+page says so, go to the vendor's list first.
+
 A drive in Fault with 0x603F = 0 is not fault-free. Read the vendor's diagnostic objects (on
 EtherCAT often the diagnosis history 0x10F3) or the error history 0x1003. Some drives clear
 0x603F on the reset, so log it before resetting.
