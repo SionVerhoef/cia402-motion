@@ -612,6 +612,7 @@ class PdoCheck(unittest.TestCase):
                 self.assertEqual([f['level'] for f in r['findings']], ['note'])
                 self.assertIn('MDP742', r['findings'][0]['message'])
                 self.assertIn('nothing else was checked', r['findings'][0]['message'])
+                self.assertIn('EL70x7', r['findings'][0]['message'])
 
     def test_beckhoff_mdp742_mixed_with_cia402_is_still_checked(self):
         r = pdo(['7010:01', '607A'], ['6010:01', '6064'], 'csp')
