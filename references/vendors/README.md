@@ -20,6 +20,7 @@ profile pages, and what it adds or leaves out.
 | `sew.md` | MOVI-C with the CiA402 device profile: MOVIDRIVE modular/system/technology, MOVITRAC advanced, decentralized units |
 | `stober.md` | SC6, SI6 with the "CiA 402" or "CiA 402 HiRes Motion" application, firmware V 6.4-D or later |
 | `synapticon.md` | SOMANET, firmware v5 |
+| `yaskawa.md` | Σ-V SGDV-E1 / SGDV-E5 with the SGDV-OCA01A EtherCAT module (2010 manual; not Σ-7) |
 
 ## How to use these pages
 
@@ -35,7 +36,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER and the Lenze manuals 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa and the Lenze manuals 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -55,6 +56,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | SEW MOVI-C (CiA402) | 2, 6; default not stated | absent (0x605C too) | 1 only (listed default 0) | not stated | brake delay at a fault, whatever 0x605E says |
 | STOBER SC6 / SI6 | present (A536), values not given; always ends in Switch on disabled | absent | absent | not stated | hardware enable (A60) gates T2–T6 and T8 |
 | Synapticon v5 | 0, 2, 6 | absent | absent | Operation enabled (T3 + T4) | not read |
+| Yaskawa Σ-V SGDV-OCA01A | 0–3 (4 undocumented), default 2; all end in Switch on disabled | power stage off (default); 1 = ramp; torque modes always off | 1 (ramp, 0x6084) | Operation enabled (T3 + T4) | Ready to switch on waits for main power and EtherCAT OP |
 
 The cell that bites most often is the quick-stop column. Code written on an EPOS4, where 0x605A
 is always 6, relies on 0x000F returning from Quick stop active (T16). On a Nanotec, a Synapticon
@@ -81,6 +83,7 @@ so a master that sends 0x000F there and waits to see Switched on may never see i
 | SEW MOVI-C (CiA402) | none | 37 only | inc/s (2023 manual); 2018 manual says 0.0001 rpm | none: fixed 65536 inc/rev, scale in the master | slot modules (csp, csv, pp/pv default) + up to 8 × 32 bit | 1, 3, 6, 8, 9, 10; −13 to −25 are SEW drive functions |
 | STOBER SC6 / SI6 | torque/force limit, positive, no index | 37 (35 described as the same) | not stated; decimals in A310/A311 | 0x6091/0x6092, 2²⁰ inc/rev default; no 0x608F | free, 24 objects per axis; re-export the DS6 ESI | 1, 3, 4, 6, 7, 8, 9, 10, −1 (jog) |
 | Synapticon v5 | end stop, negative, index | both | rpm (default) | 0x6091 is motor-to-encoder | not read | 1, 3, 4, 6, 8, 9, 10, −1 to −6 |
+| Yaskawa Σ-V SGDV-OCA01A | none (0x6098 is 0–35) | 35 only (default, not stored) | inc/s × 0x2702 ratio (default 1) | own 0x2701–0x2703, applied at 0x2700 or power cycle; no factor group | 4 + 4 maps of 8, 2 per SM; default CSP pair, no 0x6060 | 1, 3, 4, 6, 7, 8, 9, 10 |
 
 ## What a generic master had to allow for: CODESYS
 
