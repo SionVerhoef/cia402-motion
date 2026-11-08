@@ -47,7 +47,7 @@ by the master.
 ## Negative methods are not portable
 
 The same negative number means different things on different drives, sometimes with the
-direction reversed. As read 2026-10-26 (Rexroth 2026-11-08):
+direction reversed. As read 2026-10-26 (Rexroth and Lenze 2026-11-08):
 
 | Source | −1 | −2 | −3 | −4 | Other negatives |
 |---|---|---|---|---|---|
@@ -56,6 +56,7 @@ direction reversed. As read 2026-10-26 (Rexroth 2026-11-08):
 | Nanotec (`vendors/nanotec.md`) | block, negative + index | block, positive + index | — | — | −7 to −14, −17, −18, −23 to −30: block versions of the positive methods |
 | LinMot (`vendors/linmot.md`) | — | — | — | — | only −128 to −111, its own list |
 | Rexroth ctrlX DRIVE (`vendors/rexroth.md`) | no preset method: sequence built in 0x2500:02 | — | — | — | none |
+| Lenze i950, "CiA 402 advanced" (`vendors/lenze.md`) | end stop by torque, **negative**, no index | end stop by torque, positive, no index | — | — | none |
 | python-canopen 2.4.1 names (a library, not a drive) | mechanical limit negative + index | mechanical limit positive + index | negative | positive | −5 to −8: following error |
 
 **Never carry a negative method number from one drive to another.** Look up what the old
