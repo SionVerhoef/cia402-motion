@@ -41,7 +41,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | | 0x605A quick stop | 0x605B = 0 does | 0x605D default | 0x000F from Ready to switch on | Drive-side delay |
 |---|---|---|---|---|---|
 | Beckhoff EL72x1, DS402 | absent; CW bit 2 reserved | not read | not read | not read | not read |
-| Beckhoff AX8000 | 2, 6, −1; default 2 | not read | not read | not read | not read |
+| Beckhoff AX8000 | 2, 6, −1; default 2 | absent | absent | not stated | drive-on delay 0x3000:03, 100 ms |
 | Festo CMMT | absent; ramps on 0x6085, end state not documented | absent; enable off = cat. 1 stop | absent; halt ignored in CSx | Operation enabled (T3 + T4) | not read |
 | HIWIN D-series (2014) | not read | not read | not read | not read | not read |
 | Lenze i700 / i750 / i950 | 2, 6; default 2 | torque off (default); 1 = ramp first; absent on i700 | absent; halt ramps to 0 | not stated | waits brake closing time (0x2820:002) |
@@ -67,7 +67,7 @@ the table.
 | | Homing −1 | 35 / 37 | Velocity unit | Scaling | PDO mapping | Modes (0x6060) |
 |---|---|---|---|---|---|---|
 | Beckhoff EL72x1, DS402 | no homing mode | no homing mode | 0x6090 = 1 rev/s | raw increments, UINT32 | fixed, one object each | 8, 9, 10, 11 |
-| Beckhoff AX8000 | no homing mode | no homing mode | set in 0x3005 | 0x3005; default 2^20 per rev | per module, writable in PreOp | 8–11, 15; vendor −1, −9, −10 |
+| Beckhoff AX8000 | no homing mode | no homing mode | 0.0001 rpm (0x3005:02) | 0x3005; default 2^20 per rev | per module, writable in PreOp | 8–11, 15; vendor −1, −9, −10 |
 | Festo CMMT | fixed stop, negative, index | 37 only | rpm (factory) | 0x60A8–0x60AB, powers of 10; no 0x6091/0x6092 | free 0x1600/0x1A00, 16 each | 0, 1, 3, 4, 6, 8, 9, 10, −3, −20 |
 | HIWIN D-series (2014) | none (1–6, 33, 34) | neither | not read | not read | not read | not read |
 | Lenze i700 / i750 / i950 | none; i950 "advanced": torque end stop, negative | none; "advanced" uses 0 | n-unit: 2³¹ = 480000 rpm | 0x608F, 2¹⁶–2³⁰ inc/rev; no 0x6091/0x6092 | fixed PDO per mode, plus free (i700: 8 objects); default maps 0x60E0/0x60E1 | 2, 8, 9, 10; "advanced" adds 6 |

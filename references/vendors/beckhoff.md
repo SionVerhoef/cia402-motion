@@ -125,6 +125,15 @@ An older set `ax8xxx_object` (singular) still turns up in searches; its pages re
 - **0x605E**: 2 closed-loop ramp (default), 0 torque off, and the vendor values −1 "NC handling"
   and −2 shorted coils or DC braking [18797962251]. A fast-stop input with its own reaction is
   configured in 0x300E [18797896971].
+- **No 0x605B or 0x605D.** The axis module's object list goes from 0x605A to 0x605E
+  [18797721227]. Controlword bit 8 is labelled halt, but no page says what it does in the cyclic
+  modes [18797956107].
+- **A delay after Operation enabled.** On reaching Operation enabled the drive waits the drive-on
+  delay 0x3000:03 (default 100 ms, up to 5 s) for the brake to open, and ignores set-points until
+  it ends. Torque stays on for the drive-off delay 0x3000:04 (default 150 ms) after enable is
+  removed [18797735179, 18797736715, 9842278411]. Wait for statusword bit 12 before commanding
+  motion, not only for Operation enabled; that bit 12 is the better signal is our reading.
+  Whether 0x000F in Ready to switch on goes straight to Operation enabled is not stated.
 - **Statusword bits 10, 12 and 13.** The dictionary names bit 10 a status toggle, bit 12 "drive
   follows the command value" and bit 13 an input cycle counter, all tied to 0x60D9/0x60DA
   (ETG.6010 functions). Controlword bits 5–6 are an output cycle counter [18797956107,
@@ -135,13 +144,18 @@ An older set `ax8xxx_object` (singular) still turns up in searches; its pages re
   (`../errors.md`). Some errors clear with controlword bit 7 only when 0x3004:04 "extended fault
   reset" is set [18797801739].
 - **Units come from 0x3005.** Position defaults to 2^20 counts per 360° and can be set to other
-  binary resolutions or to metric units [18797826827]. Velocity and torque scaling are chosen in
-  the same object [18797828363, 18797832971]. 0x6071 is in thousandths of the motor
+  binary resolutions or to metric units [18797826827]. Velocity defaults to 0.0001 rpm (or
+  0.1 µm/s), 0x3005:02 [18797828363], and torque scaling to 1 N·m (or 1 N), 0x3005:05
+  [18797832971]. 0x6071 is in thousandths of the motor
   **standstill** torque 0x6076, not of rated torque [18798482699].
 - **PDO mapping per module.** The dictionary is split into modules (axis, interpolator, position,
   velocity and torque control, filters, encoders), each with its own 0x16xx/0x1Axx mapping
-  objects, writable in Pre-operational [18797721227, 18797722123]. No predefined sets or
-  default contents were found on these pages.
+  objects, writable in Pre-operational [18797721227, 18797722123]. The default assignment is
+  0x1600, 0x1620 and 0x1623 in 0x1C12, and 0x1A20 and 0x1A26 in 0x1C13 [18797167243,
+  18797190795]; what they contain is not on the pages read, so read the mapping from the drive.
+  Each module also has "dynamic" mapping objects (0x16E0/0x1AE0, assigned in 0x1C14/0x1C15,
+  empty by default) that stay writable in every state; their purpose is not described
+  [18797724171, 18797241995].
 - **Cycle**: 62.5 µs minimum, with distributed clocks [7917947019]. Diagnosis messages reject a
   Sync0 other than one fixed value and a Sync1 that is not a multiple of Sync0 [18793851531,
   11591665931]. Free run was not found.
