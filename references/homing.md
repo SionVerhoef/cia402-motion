@@ -37,7 +37,7 @@ whether the drive then moves to the new zero. Check the drive's manual, then hom
 Neighbouring numbers differ in which edge of the switch counts and from which side it is
 approached. Check the method diagram in the drive manual against the real switch, wired
 polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4
-and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, Yaskawa Σ-V takes only 35 (its default), and Synapticon takes both (vendor pages). Many
+and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, Yaskawa Σ-V takes only 35 (its default), and Synapticon and Mitsubishi MR-J4-TM take both (vendor pages). Many
 drives support only some of the standard methods.
 
 **No standard method homes on a hard stop.** Homing against a mechanical end stop (by current
@@ -47,7 +47,7 @@ by the master.
 ## Negative methods are not portable
 
 The same negative number means different things on different drives, sometimes with the
-direction reversed. As read 2026-10-26 (Rexroth, Lenze and STOBER 2026-11-08):
+direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER and Mitsubishi 2026-11-08):
 
 | Source | −1 | −2 | −3 | −4 | Other negatives |
 |---|---|---|---|---|---|
@@ -58,6 +58,7 @@ direction reversed. As read 2026-10-26 (Rexroth, Lenze and STOBER 2026-11-08):
 | Rexroth ctrlX DRIVE (`vendors/rexroth.md`) | no preset method: sequence built in 0x2500:02 | — | — | — | none |
 | Lenze i950, "CiA 402 advanced" (`vendors/lenze.md`) | end stop by torque, **negative**, no index | end stop by torque, positive, no index | — | — | none |
 | STOBER SC6 / SI6 (`vendors/stober.md`) | torque/force limit **positive**, no index | torque/force limit negative, no index | torque/force limit positive + index | torque/force limit negative + index | none |
+| Mitsubishi MR-J4-TM (`vendors/mitsubishi.md`) | dog, rear end, then Z, **positive** | count type (distance after the dog), then Z, positive | data set (current position, servo on) | stopper (hard stop), positive | −6 to −11 more dog/dogless types, positive; −33, −34, −36, −38 to −43 the same reversed (−32 offset) |
 | python-canopen 2.4.1 names (a library, not a drive) | mechanical limit negative + index | mechanical limit positive + index | negative | positive | −5 to −8: following error |
 
 **Never carry a negative method number from one drive to another.** Look up what the old
