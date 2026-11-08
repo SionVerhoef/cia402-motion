@@ -1,4 +1,4 @@
-# Nidec Control Techniques SI-EtherCAT (Unidrive M, Digitax HD)
+# Nidec Control Techniques SI-EtherCAT (Unidrive M, Digitax HD, M753)
 
 **Read 2026-11-08**: Control Techniques *SI-EtherCAT User Guide*, part number 0478-0152-05,
 issue 5 (copyright date 2 August 2021). Control Techniques publishes its manuals at
@@ -8,6 +8,12 @@ SI-EtherCAT is an option module, not a drive. The CiA 402 profile runs in the mo
 the host drive through its parameters, so what works depends on the host and its motor-control
 mode (open loop, RFC-A induction, RFC-S servo). The module's firmware is in Pr S.00.002, the
 host's slot menu [pp. 10, 153]. A few behaviours changed at module firmware V01.06.02 [p. 104].
+
+**The Digitax HD M753 has the EtherCAT interface built in.** The guide names a built-in
+variant, "FF-EtherCAT", besides the module [p. 32], and mentions the M753 only for its rotary
+switch, which overrides the explicit device ID [p. 135]. The maintainer reports that the M753
+uses the same EtherCAT interface as the module, so this page should apply to it too. The guide
+does not say so itself: check the M753's own documentation where it matters.
 
 ## Which host does what
 

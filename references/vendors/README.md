@@ -13,7 +13,7 @@ profile pages, and what it adds or leaves out.
 | `linmot.md` | C1250-MI, C1251-MI with the CiA 402 interface |
 | `maxon.md` | EPOS4 |
 | `nanotec.md` | CL3-E, NP5 |
-| `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD |
+| `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD; Digitax HD M753 (built-in) |
 | `omron.md` | 1S series (R88D-1SN…-ECT) |
 | `synapticon.md` | SOMANET, firmware v5 |
 
