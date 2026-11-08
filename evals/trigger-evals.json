@@ -52,6 +52,22 @@
     "should_trigger": true
   },
   {
+    "query": "Unidrive M700 with an SI-EtherCAT module won't enable from our PLC. The slave is in OP but the drive never starts running. What should I check?",
+    "should_trigger": true
+  },
+  {
+    "query": "EPOS4 stuck in fault after power-up. How do I clear it from the PLC without opening the maxon software?",
+    "should_trigger": true
+  },
+  {
+    "query": "Synapticon SOMANET servo in profile position: it accepts the new target but never moves. The same PLC code works on our other servos.",
+    "should_trigger": true
+  },
+  {
+    "query": "Omron 1S servo on a non-Omron EtherCAT master: I want the velocity offset in the cyclic data, but the process data sets look fixed. Can I add it?",
+    "should_trigger": true
+  },
+  {
     "query": "TwinCAT 3: my servo is linked to an NC axis and I move it with MC_MoveAbsolute. MC_Power.Status never goes TRUE and the axis shows error 0x4260. How do I get the NC axis enabled?",
     "should_trigger": false
   },

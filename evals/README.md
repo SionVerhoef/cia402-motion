@@ -101,3 +101,20 @@ PLC logic under "Not for" gave the description now in `SKILL.md`:
 The two exclusions were written after those near-misses fired, so the near-miss score of the
 last row is measured on the queries it was tuned to. New near-misses would confirm it. Its
 Opus misfires are again the NC axis query only.
+
+**Brand names out of the description** (2026-11-08, three runs per query, three workers). The
+description listed the vendors with pages, which could not grow with every page, and every
+vendor query also named CiA 402 objects, so nothing showed the names helped. Four queries that
+name only a product were added (Unidrive M700 with SI-EtherCAT, EPOS4, Synapticon SOMANET, Omron
+1S), and the list was replaced by "any vendor's drive, with checked pages on where named drive
+families depart from it":
+
+| Description | Haiku 5.5 product-only · should · near-miss | Opus 5.5 product-only · should · near-miss |
+|---|---|---|
+| with the brand list | 8/12 · – · – | 12/12 · – · – |
+| without it (now in `SKILL.md`) | 10/12 · 49/51 · 0/33 | 12/12 · 51/51 · 2/33 |
+
+The names did not help: Nidec, never in the list, fired in every run, and Haiku missed the
+Synapticon query 3 of 3 with Synapticon named. The Haiku difference is within three-run noise.
+Opus misfires are the NC axis query again. A first attempt that ran four checks at once timed
+out most session start-ups and scored them as misses; run one check at a time.
