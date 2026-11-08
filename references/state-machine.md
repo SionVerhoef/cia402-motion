@@ -110,8 +110,9 @@ VL. Drives differ in what they use in the cyclic modes. The quick-stop ramp is 0
 VL).
 
 The vendor subsets differ enough to break a port: maxon EPOS4 offers only 6, Synapticon 0, 2
-and 6, Nanotec's CL3-E 0–2, and Beckhoff's EL72x1 in DS402 has no 0x605A at all. Sources are on
-the vendor pages.
+and 6, Nanotec's CL3-E 0–2, and Beckhoff's EL72x1 in DS402 has no 0x605A at all. Defaults
+differ too: the Beckhoff AX8000 and the Lenze i700 family ship with 2, so a quick stop ends in
+Switch on disabled and 0x000F does not bring the axis back. Sources are on the vendor pages.
 
 **To pause an axis, use halt (bit 8), not quick stop.** Halt keeps the drive in Operation
 enabled and the motion resumes when bit 8 drops. Quick stop is for abnormal stops, and whether
