@@ -7,9 +7,8 @@ profile pages, and what it adds or leaves out.
 
 | Page | Products |
 |---|---|
-| `beckhoff.md` | EL7201, EL7211, EL7221 servo terminals: MDP742 vs DS402 |
-| `delta.md` | ASDA-A3-EP (400 V, EtherCAT); the 230 V ASDA-A3-E was not read |
 | `beckhoff.md` | EL7201/7211/7221 servo terminals (MDP742 vs DS402); AX8000; EL7037/EL7047 steppers (not CiA 402); AX1000, AF1000 (no object documentation) |
+| `delta.md` | ASDA-A3-EP (400 V, EtherCAT); the 230 V ASDA-A3-E was not read |
 | `festo.md` | CMMT-AS (S1, S3), CMMT-ST, firmware V37.1 |
 | `hiwin.md` | D-series EtherCAT drives (2014 guide) |
 | `lenze.md` | i550 / i650 motec, i700, i750, i950 (with the "CiA 402 advanced" application) |
@@ -47,8 +46,8 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | | 0x605A quick stop | 0x605B = 0 does | 0x605D default | 0x000F from Ready to switch on | Drive-side delay |
 |---|---|---|---|---|---|
 | Beckhoff EL72x1, DS402 | absent; CW bit 2 reserved | not read | not read | not read | not read |
-| Delta ASDA-A3-EP | absent; CW bit 2 ramps on 0x6085, limit switches on the P5.003 time | 0 = coast (no dynamic brake), −1 = dynamic brake | absent | Operation enabled (T3 + T4) | not read |
 | Beckhoff AX8000 | 2, 6, −1; default 2 | absent | absent | not stated | drive-on delay 0x3000:03, 100 ms |
+| Delta ASDA-A3-EP | absent; CW bit 2 ramps on 0x6085, limit switches on the P5.003 time | 0 = coast (no dynamic brake), −1 = dynamic brake | absent | Operation enabled (T3 + T4) | not read |
 | Festo CMMT | absent; ramps on 0x6085, end state not documented | absent; enable off = cat. 1 stop | absent; halt ignored in CSx | Operation enabled (T3 + T4) | not read |
 | HIWIN D-series (2014) | not read | not read | not read | not read | not read |
 | Lenze i700 / i750 / i950 | 2, 6; default 2 | torque off (default); 1 = ramp first; absent on i700 | absent; halt ramps to 0 | not stated | waits brake closing time (0x2820:002) |
@@ -78,8 +77,8 @@ the table.
 | | Homing −1 | 35 / 37 | Velocity unit | Scaling | PDO mapping | Modes (0x6060) |
 |---|---|---|---|---|---|---|
 | Beckhoff EL72x1, DS402 | no homing mode | no homing mode | 0x6090 = 1 rev/s | raw increments, UINT32 | fixed, one object each | 8, 9, 10, 11 |
-| Delta ASDA-A3-EP | hard stop + index (direction only in a figure) | 35 only (0x6098 range −4 to 35) | 0.1 rpm; 0x6081 in PUU/s; ramps are ms to 3000 rpm | 0x6093 = E-gear on 2²⁴ pulses/rev; no 0x608F/0x6091/0x6092 | 4 + 4 maps of 8, one of each assigned; default without 0x6060 | 1, 3, 4, 6, 8, 9, 10 |
 | Beckhoff AX8000 | no homing mode | no homing mode | 0.0001 rpm (0x3005:02) | 0x3005; default 2^20 per rev | per module, writable in PreOp | 8–11, 15; vendor −1, −9, −10 |
+| Delta ASDA-A3-EP | hard stop + index (direction only in a figure) | 35 only (0x6098 range −4 to 35) | 0.1 rpm; 0x6081 in PUU/s; ramps are ms to 3000 rpm | 0x6093 = E-gear on 2²⁴ pulses/rev; no 0x608F/0x6091/0x6092 | 4 + 4 maps of 8, one of each assigned; default without 0x6060 | 1, 3, 4, 6, 8, 9, 10 |
 | Festo CMMT | fixed stop, negative, index | 37 only | rpm (factory) | 0x60A8–0x60AB, powers of 10; no 0x6091/0x6092 | free 0x1600/0x1A00, 16 each | 0, 1, 3, 4, 6, 8, 9, 10, −3, −20 |
 | HIWIN D-series (2014) | none (1–6, 33, 34) | neither | not read | not read | not read | not read |
 | Lenze i700 / i750 / i950 | none; i950 "advanced": torque end stop, negative | none; "advanced" uses 0 | n-unit: 2³¹ = 480000 rpm | 0x608F, 2¹⁶–2³⁰ inc/rev; no 0x6091/0x6092 | fixed PDO per mode, plus free (i700: 8 objects); default maps 0x60E0/0x60E1 | 2, 8, 9, 10; "advanced" adds 6 |
