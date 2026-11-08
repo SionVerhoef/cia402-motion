@@ -583,7 +583,11 @@ def decode_mode(code):
     notes = []
     if code == 11:
         notes.append('Few drives offer mode 11. Beckhoff documents it for the EL72x1 in '
-                     'DS402, and TI\'s Industrial Communications SDK lists it.')
+                     'DS402 and the AX8000, and TI\'s Industrial Communications SDK lists it.')
+    if code == 15:
+        notes.append('Beckhoff\'s AX8000 documents 15 as CSPAF, a cyclic position mode of its '
+                     'own (references/vendors/beckhoff.md). Elsewhere it may mean something '
+                     'else or be refused.')
     if kind == 'manufacturer':
         notes.append('Negative modes are manufacturer-specific: the same number can mean '
                      'different things on different drives. Look it up in this drive\'s '
@@ -1036,8 +1040,9 @@ def check_pdo(rx, tx, modes):
         rest = (', so nothing else was checked' if not mapped else '')
         add('note', 'rx', 0x7010, f'0x7010 and 0x6010 are Beckhoff\'s MDP742 drive profile '
                                   f'(EL72x1 and others; controlword 0x7010:01, statusword '
-                                  f'0x6010:01), not CiA 402{rest}: see '
-                                  f'references/vendors/beckhoff.md.')
+                                  f'0x6010:01), or on an EL70x7 stepper terminal its own '
+                                  f'stepper objects (enable 0x7010:01); either way not CiA '
+                                  f'402{rest}: see references/vendors/beckhoff.md.')
     axes = sorted({axis for axis, _ in mapped}) or ([] if mdp742 else [1])
     for axis in axes:
         if axis > 1 and not any((axis, b) in mapped for b in (0x6040, 0x6041)):

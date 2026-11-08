@@ -22,12 +22,16 @@ on 0x6061. The mode decides what the set-point objects mean and what controlword
 0 means no mode. Negative codes are manufacturer-specific, and the same number means
 different things on different drives. 0x6502 bits 16–31 are the vendor's own modes.
 
-Mode 11 is in few drives. Beckhoff documents it for the EL72x1 in DS402: target torque 0x6071
-plus the commutation angle 0x60EA (`vendors/beckhoff.md`). TI's Industrial Communications SDK
+Mode 11 is in few drives. Beckhoff documents it for the EL72x1 in DS402 and for the AX8000:
+target torque 0x6071 plus the commutation angle 0x60EA (`vendors/beckhoff.md`). TI's Industrial Communications SDK
 lists it among the modes drives are recommended to support ("EtherCAT SubDevice: CiA402
 Example", section Operation modes, read 2026-10-26,
 https://software-dl.ti.com/processor-industrial-sw/esd/ind_comms_sdk/am243x/2026_00_00_06/docs/am243x/ethercat_subdevice/example2.html).
 python-canopen stops at 10.
+
+Mode 15 is not in the table above. The Beckhoff AX8000 documents it as CSPAF, a cyclic position
+mode of its own, beside its negative vendor modes (`vendors/beckhoff.md`). Do not send 15 to
+another drive on the strength of that.
 
 `cia402.py decode modes <0x6502>` lists what a drive claims; `decode mode <n>` names one code.
 What a *particular* drive supports is a device fact. Read its 0x6502, or ask the
