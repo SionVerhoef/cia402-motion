@@ -26,6 +26,7 @@ indices, bit numbers and code values are stated as facts, as the sources below r
 | LinMot EtherCAT CiA402 Profile Interface (0185-1178-E_1V0) | All rights reserved | Read. Deviations on `references/vendors/linmot.md`. |
 | Texas Instruments Industrial Communications SDK, EtherCAT SubDevice CiA402 example | All rights reserved | Read. Lists mode 11 among the modes drives are recommended to support. |
 | Lenze knowledge base 202600119, 202500375, 202500394 and their commissioning guides | All rights reserved | Read. Facts on `references/vendors/lenze.md`. |
+| Control Techniques SI-EtherCAT User Guide 0478-0152-05, issue 5 | All rights reserved | Read. Deviations on `references/vendors/nidec.md`. |
 | HIWIN Drive User Guide v1.0 (2014) | All rights reserved | Read. Homing facts on `references/vendors/hiwin.md`. |
 | CODESYS SoftMotion, Generic CiA402 Axis configuration page | All rights reserved | Read. Its compatibility parameters are named on `references/vendors/README.md`. |
 | [ICube Robotics `ethercat_driver_ros2`](https://github.com/ICube-Robotics/ethercat_driver_ros2) issue tracker | — | Field cases. Real statuswords from its logs are test values, among them the non-standard 0x0068 an EL7221 reported. |
@@ -41,7 +42,8 @@ registered trademark and patented technology, licensed by Beckhoff Automation Gm
 TwinCAT® and Beckhoff® are registered trademarks of and licensed by Beckhoff Automation GmbH.
 IEC is a trademark of the International Electrotechnical Commission. Other product and
 company names, such as maxon, EPOS4, Omron, Synapticon, SOMANET, Nanotec, LinMot, Lenze,
-HIWIN, CODESYS, PLCopen and Texas Instruments, are trademarks of their owners.
+Nidec, Control Techniques, Unidrive, Digitax, HIWIN, CODESYS, PLCopen and Texas Instruments,
+are trademarks of their owners.
 
 All are used nominatively — to identify the technology this skill works with. None of these
 organisations is affiliated with this project or endorses it. This project claims no

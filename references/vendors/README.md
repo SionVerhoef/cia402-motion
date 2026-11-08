@@ -13,6 +13,7 @@ profile pages, and what it adds or leaves out.
 | `linmot.md` | C1250-MI, C1251-MI with the CiA 402 interface |
 | `maxon.md` | EPOS4 |
 | `nanotec.md` | CL3-E, NP5 |
+| `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD; Digitax HD M753 (built-in) |
 | `omron.md` | 1S series (R88D-1SN…-ECT) |
 | `synapticon.md` | SOMANET, firmware v5 |
 
@@ -38,6 +39,7 @@ As read 2026-10-26. "not read" means the documents read did not cover it.
 | Lenze i750 / i950 | not read | not read | not read | not read | free; default set has 0x60B1, 0x60E0/0x60E1 | CSP, CST, CSV, velocity (examples) |
 | maxon EPOS4 | 6 only | hard stop, positive, index | 37 only | no factor group; 0x60A8–0x60AA, gear 0x3003 | not read | 1, 3, 6, 8, 9, 10 |
 | Nanotec CL3-E / NP5 | 0, 1, 2 | block, negative, index | 35 (CL3-E) | not read | not read | not read; adds −1, −2 |
+| Nidec SI-EtherCAT (read 2026-11-08) | 0, 1, 2, 5, 6; default 2 | none (0x6098 is unsigned, 0–37) | both (35 legacy) | 0x608F read-only; 0x6091/0x6092 applied at T3; velocity per ms | one PDO per SM, ≤ 12 objects; default 0x1605/0x1A05 (vl) | 1, 2, 6–10 by host (0x6502) |
 | Omron 1S | not read | not read | not read | 0x6091 (≥ 250 µs cycle), no 0x6092 | fixed 0x17xx/0x1Bxx + editable 0x1600/0x1A00 | not read |
 | Synapticon v5 | 0, 2, 6 | end stop, negative, index | both | 0x6091 is motor-to-encoder shaft | not read | 1, 3, 4, 6, 8, 9, 10 + −1 to −6 |
 | LinMot C125x-MI | absent | only −128 to −111 | not supported | vendor parameters (0x60FF in 1 µm/s) | predefined modules + free 0x1620/0x1A20 | 1, 6, 8, 10 + 0x8A |
