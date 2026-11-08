@@ -37,7 +37,7 @@ whether the drive then moves to the new zero. Check the drive's manual, then hom
 Neighbouring numbers differ in which edge of the switch counts and from which side it is
 approached. Check the method diagram in the drive manual against the real switch, wired
 polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4
-and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, Yaskawa Σ-V and Delta ASDA-A3-EP take only 35, and Synapticon, Mitsubishi MR-J4-TM and Leadshine take both (vendor pages). Many
+and SEW MOVI-C take only 37, Nanotec's CL3-E and Kollmorgen's AKD document only 35, Yaskawa Σ-V and Delta ASDA-A3-EP take only 35, and Synapticon, Mitsubishi MR-J4-TM and Leadshine take both (vendor pages). Many
 drives support only some of the standard methods.
 
 **No standard method homes on a hard stop.** Homing against a mechanical end stop (by current
@@ -47,7 +47,7 @@ by the master.
 ## Negative methods are not portable
 
 The same negative number means different things on different drives, sometimes with the
-direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER, Mitsubishi, Delta and Leadshine 2026-11-08):
+direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER, Mitsubishi, Delta, Leadshine and Kollmorgen 2026-11-08):
 
 | Source | −1 | −2 | −3 | −4 | Other negatives |
 |---|---|---|---|---|---|
@@ -57,6 +57,7 @@ direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER, Mitsubishi, Delt
 | LinMot (`vendors/linmot.md`) | — | — | — | — | only −128 to −111, its own list |
 | Rexroth ctrlX DRIVE (`vendors/rexroth.md`) | no preset method: sequence built in 0x2500:02 | — | — | — | none |
 | Lenze i950, "CiA 402 advanced" (`vendors/lenze.md`) | end stop by torque, **negative**, no index | end stop by torque, positive, no index | — | — | none |
+| Kollmorgen AKD fw 1.17 (`vendors/kollmorgen.md`) | reserved | reserved | reference switch, fast then slow, negative | the same, positive (manual gives `HOME.DIR` = 0 for both) | −5: set home here and store in NVRAM; −6/−7: home input positive/negative, then next feedback zero |
 | STOBER SC6 / SI6 (`vendors/stober.md`) | torque/force limit **positive**, no index | torque/force limit negative, no index | torque/force limit positive + index | torque/force limit negative + index | none |
 | Mitsubishi MR-J4-TM (`vendors/mitsubishi.md`) | dog, rear end, then Z, **positive** | count type (distance after the dog), then Z, positive | data set (current position, servo on) | stopper (hard stop), positive | −6 to −11 more dog/dogless types, positive; −33, −34, −36, −38 to −43 the same reversed (−32 offset) |
 | Delta ASDA-A3-EP (`vendors/delta.md`) | hard stop + index (direction shown only in the manual's figure) | hard stop + index, other direction | hard stop, no index | hard stop, no index, other direction | none (0x6098 range −4 to 35) |
