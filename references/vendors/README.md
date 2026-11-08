@@ -16,6 +16,7 @@ profile pages, and what it adds or leaves out.
 | `nanotec.md` | CL3-E, NP5 |
 | `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD; Digitax HD M753 (built-in) |
 | `omron.md` | 1S series (R88D-1SN…-ECT) |
+| `rexroth.md` | ctrlX DRIVE, firmware AXS-V-06RS (not IndraDrive / HCS01) |
 | `synapticon.md` | SOMANET, firmware v5 |
 
 ## How to use these pages
@@ -32,7 +33,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec and Festo 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo and Rexroth 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -48,6 +49,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | Nanotec CL3-E / NP5 | 0, 1, 2 | not read | not read | not read | not read |
 | Nidec SI-EtherCAT | 0, 1, 2, 5, 6; default 2 | ramp, then disable | 0: halt does nothing | Operation enabled (T3 + T4) | 40 ms background loop |
 | Omron 1S | not read | not read | not read | not read | not read |
+| Rexroth ctrlX DRIVE | 0, 2, 3, 6, 7 | torque off; default is −1 (use 0x605C) | not stated; halt ignored in CSx | not stated | magnetising / brake release; Shutdown only in OM |
 | Synapticon v5 | 0, 2, 6 | absent | absent | Operation enabled (T3 + T4) | not read |
 
 The cell that bites most often is the quick-stop column. Code written on an EPOS4, where 0x605A
@@ -71,6 +73,7 @@ so a master that sends 0x000F there and waits to see Switched on may never see i
 | Nanotec CL3-E / NP5 | block, negative, index | 35 (CL3-E) | rpm (factory) | not read | not read | not read; adds −1, −2 |
 | Nidec SI-EtherCAT | none (0x6098 unsigned) | both (35 legacy) | units per **ms** | 0x6091/0x6092 taken at T3 | one PDO per SM; default vl | 1, 2, 6–10, by host |
 | Omron 1S | not read | not read | not read | 0x6091 (≥ 250 µs), no 0x6092 | fixed + editable 0x1600/0x1A00 | not read |
+| Rexroth ctrlX DRIVE | free configuration (0x2500:02) | 37 only | preset 0.0001 rpm or 0.001 mm/min | own (0x2900–0x2906), CM only; no 0x6092 | free, 20 objects / 50 bytes | 1, 3, 4, 6, 8, 9, 10, −1 (one vendor mode) |
 | Synapticon v5 | end stop, negative, index | both | rpm (default) | 0x6091 is motor-to-encoder | not read | 1, 3, 4, 6, 8, 9, 10, −1 to −6 |
 
 ## What a generic master had to allow for: CODESYS
