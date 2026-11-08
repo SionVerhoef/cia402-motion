@@ -37,8 +37,10 @@ whether the drive then moves to the new zero. Check the drive's manual, then hom
 Neighbouring numbers differ in which edge of the switch counts and from which side it is
 approached. Check the method diagram in the drive manual against the real switch, wired
 polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4
-and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, Yaskawa Σ-V, Delta ASDA-A3-EP and Schneider Lexium 32M take only 35, and Synapticon, Mitsubishi MR-J4-TM, Leadshine, Panasonic A6BN and KEB F6/S6 (35 as an alias) take both (vendor pages). Many
-drives support only some of the standard methods.
+and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, Yaskawa Σ-V, Delta ASDA-A3-EP,
+Schneider Lexium 32M and Elmo Gold (2012 manual) take only 35, and Synapticon, Mitsubishi
+MR-J4-TM, Leadshine, Panasonic A6BN and KEB F6/S6 (35 as an alias) take both (vendor pages).
+Many drives support only some of the standard methods.
 
 **No standard method homes on a hard stop.** Homing against a mechanical end stop (by current
 threshold or following error) is always a vendor method with a negative number, or it is done
@@ -47,7 +49,7 @@ by the master.
 ## Negative methods are not portable
 
 The same negative number means different things on different drives, sometimes with the
-direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER, Mitsubishi, Delta, Leadshine and Panasonic 2026-11-08):
+direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER, Mitsubishi, Delta, Leadshine, Panasonic and Elmo 2026-11-08):
 
 | Source | −1 | −2 | −3 | −4 | Other negatives |
 |---|---|---|---|---|---|
@@ -62,6 +64,7 @@ direction reversed. As read 2026-10-26 (Rexroth, Lenze, STOBER, Mitsubishi, Delt
 | Delta ASDA-A3-EP (`vendors/delta.md`) | hard stop + index (direction shown only in the manual's figure) | hard stop + index, other direction | hard stop, no index | hard stop, no index, other direction | none (0x6098 range −4 to 35) |
 | Leadshine EL8-EC (`vendors/leadshine.md`) | end stop by torque, **positive**, + index | end stop by torque, negative, + index | end stop positive, home where torque drops | end stop negative, home where torque drops | −5 / −6: low speed, positive / negative, home at the threshold; EM3E has none |
 | Panasonic MINAS A6BN (`vendors/panasonic.md`) | hard stop **positive**, no index | hard stop negative, no index | hard stop **negative**, then index | hard stop **positive**, then index | none |
+| Elmo Gold Line, 2012 manual (`vendors/elmo.md`) | block by torque, **reverse**, no index; stops only, **sets no position** | block by torque, forward, same | — | — | none listed |
 | python-canopen 2.4.1 names (a library, not a drive) | mechanical limit negative + index | mechanical limit positive + index | negative | positive | −5 to −8: following error |
 
 **Never carry a negative method number from one drive to another.** Look up what the old
