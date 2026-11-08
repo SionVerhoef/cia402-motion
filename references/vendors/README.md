@@ -22,6 +22,7 @@ profile pages, and what it adds or leaves out.
 | `omron.md` | 1S series (R88D-1SN…-ECT) |
 | `panasonic.md` | MINAS A6BN (A6B gantry control type, linear motors only), software Ver.3.20; not the rotary A6B |
 | `rexroth.md` | ctrlX DRIVE, firmware AXS-V-06RS (not IndraDrive / HCS01) |
+| `schneider.md` | Lexium 32M (LXM32M), from the user guide only (fieldbus manuals not read) |
 | `sew.md` | MOVI-C with the CiA402 device profile: MOVIDRIVE modular/system/technology, MOVITRAC advanced, decentralized units |
 | `stober.md` | SC6, SI6 with the "CiA 402" or "CiA 402 HiRes Motion" application, firmware V 6.4-D or later |
 | `synapticon.md` | SOMANET, firmware v5 |
@@ -41,7 +42,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Delta, Leadshine, KEB, Panasonic, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Delta, Leadshine, KEB, Panasonic, Schneider, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -64,6 +65,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | Omron 1S | not read | not read | not read | not read | not read |
 | Panasonic MINAS A6BN | 0–3, 5–7, vendor −1, −2; 0 = Panasonic's servo-off sequence | Panasonic's servo-off sequence (3506h) | 1–3 only, no 0; default not read | Operation enabled (T3 + T4) | wait ~100 ms after enable; magnet-pole estimation |
 | Rexroth ctrlX DRIVE | 0, 2, 3, 6, 7 | torque off; default is −1 (use 0x605C) | not stated; halt ignored in CSx | not stated | magnetising / brake release; Shutdown only in OM |
+| Schneider Lexium 32M | not in the guide; Schneider's 0x3006:18 takes −2, −1, 6, 7, default 6 | power stage off at once; 1 = halt first | 1 (ramp); 1 or 3 only | T4 listed as automatic; T2 automatic unless 0x301B:13 = 1 | not read |
 | SEW MOVI-C (CiA402) | 2, 6; default not stated | absent (0x605C too) | 1 only (listed default 0) | not stated | brake delay at a fault, whatever 0x605E says |
 | STOBER SC6 / SI6 | present (A536), values not given; always ends in Switch on disabled | absent | absent | not stated | hardware enable (A60) gates T2–T6 and T8 |
 | Synapticon v5 | 0, 2, 6 | absent | absent | Operation enabled (T3 + T4) | not read |
@@ -98,6 +100,7 @@ the table.
 | Omron 1S | not read | not read | not read | 0x6091 (≥ 250 µs), no 0x6092 | fixed + editable 0x1600/0x1A00 | not read |
 | Panasonic MINAS A6BN | hard stop, positive, no index | both (37 preferred) | command units/s; 0x6080 in r/min | 0x608F set by drive; 0x6091/0x6092 taken at Init → PreOP | free 0x1600–03 / 0x1A00–03, 32 bytes per direction | 3, 4, 6, 8, 9, 10 (1 accepted, not supported) |
 | Rexroth ctrlX DRIVE | free configuration (0x2500:02) | 37 only | preset 0.0001 rpm or 0.001 mm/min | own (0x2900–0x2906), CM only; no 0x6092 | free, 20 objects / 50 bytes | 1, 3, 4, 6, 8, 9, 10, −1 (one vendor mode) |
+| Schneider Lexium 32M | none | 35 only (sets 0x301B:16, not 0x607C) | usr_v, factory 1 rpm | own 0x3006:07/08 (16384/rev); writing the numerator activates | not read | 1, 3, 4, 6, 7 (CAN only), 8, 9, 10, −1, −2, −3, −6 |
 | SEW MOVI-C (CiA402) | none | 37 only | inc/s (2023 manual); 2018 manual says 0.0001 rpm | none: fixed 65536 inc/rev, scale in the master | slot modules (csp, csv, pp/pv default) + up to 8 × 32 bit | 1, 3, 6, 8, 9, 10; −13 to −25 are SEW drive functions |
 | STOBER SC6 / SI6 | torque/force limit, positive, no index | 37 (35 described as the same) | not stated; decimals in A310/A311 | 0x6091/0x6092, 2²⁰ inc/rev default; no 0x608F | free, 24 objects per axis; re-export the DS6 ESI | 1, 3, 4, 6, 7, 8, 9, 10, −1 (jog) |
 | Synapticon v5 | end stop, negative, index | both | rpm (default) | 0x6091 is motor-to-encoder | not read | 1, 3, 4, 6, 8, 9, 10, −1 to −6 |
