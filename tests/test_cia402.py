@@ -465,6 +465,8 @@ class OtherObjects(unittest.TestCase):
         self.assertEqual(cia402.decode_mode(11)['key'], 'cstca')
         self.assertIn('Beckhoff', cia402.decode_mode(11)['notes'][0])
         self.assertEqual(cia402.decode_mode(12)['kind'], 'unknown')
+        self.assertIn('AX8000', cia402.decode_mode(15)['notes'][0])
+        self.assertEqual(cia402.decode_mode(15)['kind'], 'unknown')
 
     def test_homing_methods(self):
         cases = {

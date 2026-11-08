@@ -583,7 +583,11 @@ def decode_mode(code):
     notes = []
     if code == 11:
         notes.append('Few drives offer mode 11. Beckhoff documents it for the EL72x1 in '
-                     'DS402, and TI\'s Industrial Communications SDK lists it.')
+                     'DS402 and the AX8000, and TI\'s Industrial Communications SDK lists it.')
+    if code == 15:
+        notes.append('Beckhoff\'s AX8000 documents 15 as CSPAF, a cyclic position mode of its '
+                     'own (references/vendors/beckhoff.md). Elsewhere it may mean something '
+                     'else or be refused.')
     if kind == 'manufacturer':
         notes.append('Negative modes are manufacturer-specific: the same number can mean '
                      'different things on different drives. Look it up in this drive\'s '
