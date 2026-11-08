@@ -116,5 +116,19 @@ families depart from it":
 
 The names did not help: Nidec, never in the list, fired in every run, and Haiku missed the
 Synapticon query 3 of 3 with Synapticon named. The Haiku difference is within three-run noise.
-Opus misfires are the NC axis query again. A first attempt that ran four checks at once timed
+Opus misfires are the NC axis query again.
+
+The profile covers frequency inverters too (VL is their mode), so the description then said
+"servo, stepper or frequency-inverter (VFD) drive" and named VL among the modes, and one
+should-trigger query asks about an inverter in velocity mode stuck in Switch on disabled. The
+worry was the Modbus VFD and SINAMICS/PROFINET near-misses. Same day and setup:
+
+| Description | Haiku 5.5 should · near-miss | Opus 5.5 should · near-miss |
+|---|---|---|
+| with VFD and VL (now in `SKILL.md`) | 52/54 · 0/33 | 54/54 · 3/33 |
+
+The inverter query fired 3 of 3 on both, the Modbus and PROFINET queries 0 of 3 on both. All
+three Opus misfires are the NC axis query, 3 of 3 this time: still the one borderline.
+
+A first attempt that ran four checks at once timed
 out most session start-ups and scored them as misses; run one check at a time.

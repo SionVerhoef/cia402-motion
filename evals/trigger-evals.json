@@ -68,6 +68,10 @@
     "should_trigger": true
   },
   {
+    "query": "Frequency inverter on EtherCAT running a pump in velocity mode: after a mains dip it stays in switch on disabled and our PLC never gets it running again. What should the PLC send?",
+    "should_trigger": true
+  },
+  {
     "query": "TwinCAT 3: my servo is linked to an NC axis and I move it with MC_MoveAbsolute. MC_Power.Status never goes TRUE and the axis shows error 0x4260. How do I get the NC axis enabled?",
     "should_trigger": false
   },
