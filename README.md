@@ -140,7 +140,7 @@ on this page.
 - **The CANopen bring-up page** has not been run on a bus.
 - **Mode 11 (cyclic synchronous torque with commutation angle)** comes from Beckhoff and TI
   documentation, and nothing independent checks it.
-- **Drives without a vendor page**, Kollmorgen AKD among them, were not read. No page means
+- **Drives without a vendor page** were not read. No page means
   nothing was read, not that the drive follows the profile.
 
 ## Tests
