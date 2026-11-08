@@ -37,7 +37,7 @@ whether the drive then moves to the new zero. Check the drive's manual, then hom
 Neighbouring numbers differ in which edge of the switch counts and from which side it is
 approached. Check the method diagram in the drive manual against the real switch, wired
 polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4
-takes only 37, Nanotec's CL3-E documents only 35, and Synapticon takes both (vendor pages). Many
+and SEW MOVI-C take only 37, Nanotec's CL3-E documents only 35, and Synapticon takes both (vendor pages). Many
 drives support only some of the standard methods.
 
 **No standard method homes on a hard stop.** Homing against a mechanical end stop (by current
