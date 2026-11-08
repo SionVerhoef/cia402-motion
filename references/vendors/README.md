@@ -7,7 +7,7 @@ profile pages, and what it adds or leaves out.
 
 | Page | Products |
 |---|---|
-| `beckhoff.md` | EL7201, EL7211, EL7221 servo terminals: MDP742 vs DS402 |
+| `beckhoff.md` | EL7201/7211/7221 servo terminals (MDP742 vs DS402); AX8000; EL7037/EL7047 steppers (not CiA 402); AX1000, AF1000 (no object documentation) |
 | `festo.md` | CMMT-AS (S1, S3), CMMT-ST, firmware V37.1 |
 | `hiwin.md` | D-series EtherCAT drives (2014 guide) |
 | `kollmorgen.md` | AKD with onboard EtherCAT, firmware 1.17 (manual edition P, 2017) |
@@ -34,7 +34,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec, Festo, Rexroth, Kollmorgen and the Lenze manuals 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo, Rexroth, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -42,6 +42,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | | 0x605A quick stop | 0x605B = 0 does | 0x605D default | 0x000F from Ready to switch on | Drive-side delay |
 |---|---|---|---|---|---|
 | Beckhoff EL72x1, DS402 | absent; CW bit 2 reserved | not read | not read | not read | not read |
+| Beckhoff AX8000 | 2, 6, −1; default 2 | absent | absent | not stated | drive-on delay 0x3000:03, 100 ms |
 | Festo CMMT | absent; ramps on 0x6085, end state not documented | absent; enable off = cat. 1 stop | absent; halt ignored in CSx | Operation enabled (T3 + T4) | not read |
 | HIWIN D-series (2014) | not read | not read | not read | not read | not read |
 | Kollmorgen AKD | 1, 2, 5, 6; default 2 | absent (0x35FF `DRV.DISMODE`) | absent; bit 8 halts in all modes | not stated | Switched on may already enable the power stage (FBUS.PARAM05 bit 8) |
@@ -54,19 +55,21 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | Rexroth ctrlX DRIVE | 0, 2, 3, 6, 7 | torque off; default is −1 (use 0x605C) | not stated; halt ignored in CSx | not stated | magnetising / brake release; Shutdown only in OM |
 | Synapticon v5 | 0, 2, 6 | absent | absent | Operation enabled (T3 + T4) | not read |
 
-The cell that bites most often is the quick-stop column. Code written on an EPOS4, where 0x605A
-is always 6, relies on 0x000F returning from Quick stop active (T16). On a Nanotec, a Synapticon
-set to 2, a Lenze or a Kollmorgen AKD at its default (2), or a Beckhoff terminal, that path does not exist. Next come 0x605B = 0, which coasts on
-most drives but ramps on a Nidec, and halt, which does nothing on a Nidec until 0x605D is set. A
-drive that takes 0x000F in Ready to switch on as T3 + T4 can go straight to Operation enabled,
-so a master that sends 0x000F there and waits to see Switched on may never see it. Sending
-0x0007, waiting for Switched on, then 0x000F works on every drive in the table.
+The cell that bites most often is the quick-stop column. Code written on an EPOS4, where 0x605A is
+always 6, relies on 0x000F returning from Quick stop active (T16). On a Nanotec, a Synapticon set to
+2, a Lenze, a Kollmorgen AKD or a Beckhoff AX8000 at its default (2), or a Beckhoff terminal, that path does not
+exist. Next come 0x605B = 0, which coasts on most drives but ramps on a Nidec, and halt, which does
+nothing on a Nidec until 0x605D is set. A drive that takes 0x000F in Ready to switch on as T3 + T4
+can go straight to Operation enabled, so a master that sends 0x000F there and waits to see Switched
+on may never see it. Sending 0x0007, waiting for Switched on, then 0x000F works on every drive in
+the table.
 
 ### Motion
 
 | | Homing −1 | 35 / 37 | Velocity unit | Scaling | PDO mapping | Modes (0x6060) |
 |---|---|---|---|---|---|---|
 | Beckhoff EL72x1, DS402 | no homing mode | no homing mode | 0x6090 = 1 rev/s | raw increments, UINT32 | fixed, one object each | 8, 9, 10, 11 |
+| Beckhoff AX8000 | no homing mode | no homing mode | 0.0001 rpm (0x3005:02) | 0x3005; default 2^20 per rev | per module, writable in PreOp | 8–11, 15; vendor −1, −9, −10 |
 | Festo CMMT | fixed stop, negative, index | 37 only | rpm (factory) | 0x60A8–0x60AB, powers of 10; no 0x6091/0x6092 | free 0x1600/0x1A00, 16 each | 0, 1, 3, 4, 6, 8, 9, 10, −3, −20 |
 | HIWIN D-series (2014) | none (1–6, 33, 34) | neither | not read | not read | not read | not read |
 | Kollmorgen AKD | reserved; vendor −3 to −7 (switch, set + store, input + feedback zero) | 35 only | 0.001 rpm (pv), or 0x204C | FBUS.PARAM05 bit 4: WorkBench `UNIT` or 0x6091/0x6092 | fixed 0x1701–0x1725 / 0x1B01–0x1B26, or free 4 × 8 bytes, even length | 1, 3, 4, 6, 7, 8 (9, 10 in 0x6060 only); vendor −1 to −3 |
@@ -100,6 +103,9 @@ disagree. That makes this list a map of where to expect trouble, whatever the ma
 - **Multi-axis**: for CANopen EDS files the page gives the per-axis object range as 67FFh +
   X × 800h. For EtherCAT the number of axes comes from the ESI (its DS402 channel count), so
   ask **ethercat-esi**.
+
+The Beckhoff EL70x7 steppers are not CiA 402 drives and have no row; the AX1000 and AF1000 have
+no published object documentation (`beckhoff.md`).
 
 ## Adding a vendor
 
