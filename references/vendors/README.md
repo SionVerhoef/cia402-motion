@@ -78,8 +78,10 @@ documents read did not cover it; "absent" means the object is not in the drive's
 The cell that bites most often is the quick-stop column. Code written on an EPOS4, where 0x605A is
 always 6, relies on 0x000F returning from Quick stop active (T16). On a Nanotec, a Synapticon set to
 2, a Lenze, a Kollmorgen AKD or a Beckhoff AX8000 at its default (2), or a Beckhoff terminal, that path does not
-exist. Next come 0x605B = 0, which coasts on most drives but ramps on a Nidec, and halt, which does
-nothing on a Nidec until 0x605D is set. A drive that takes 0x000F in Ready to switch on as T3 + T4
+exist. A Festo CMMT has no 0x605A at all, and its manual does not say where quick stop ends
+(`festo.md`). Next come 0x605B = 0, which coasts on most drives but ramps on a Nidec, and halt, which does
+nothing on a Nidec until 0x605D is set and is ignored in the cyclic modes on a Festo CMMT, a
+Mitsubishi MR-J4-TM or a Rexroth ctrlX DRIVE. A drive that takes 0x000F in Ready to switch on as T3 + T4
 can go straight to Operation enabled, so a master that sends 0x000F there and waits to see Switched
 on may never see it. Sending 0x0007, waiting for Switched on, then 0x000F works on every drive in
 the table.

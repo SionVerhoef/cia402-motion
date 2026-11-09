@@ -36,8 +36,8 @@ whether the drive then moves to the new zero. Check the drive's manual, then hom
 
 Neighbouring numbers differ in which edge of the switch counts and from which side it is
 approached. Check the method diagram in the drive manual against the real switch, wired
-polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4
-and SEW MOVI-C take only 37, Nanotec's CL3-E and Kollmorgen's AKD document only 35, Yaskawa
+polarity included. 35 and 37 mean the same, but drives differ in which they accept: maxon EPOS4,
+SEW MOVI-C and Festo CMMT (`vendors/festo.md`) take only 37, Nanotec's CL3-E and Kollmorgen's AKD document only 35, Yaskawa
 Σ-V, Delta ASDA-A3-EP, Schneider Lexium 32M and Elmo Gold (2012 manual) take only 35, and
 Synapticon, Mitsubishi MR-J4-TM, Leadshine, Panasonic A6BN and KEB F6/S6 (35 as an alias) take
 both (vendor pages). Many drives support only some of the standard methods.
