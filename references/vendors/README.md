@@ -11,6 +11,7 @@ profile pages, and what it adds or leaves out.
 | `delta.md` | ASDA-A3-EP (400 V, EtherCAT); the 230 V ASDA-A3-E was not read |
 | `festo.md` | CMMT-AS (S1, S3), CMMT-ST, firmware V37.1 |
 | `hiwin.md` | D-series EtherCAT drives (2014 guide) |
+| `keb.md` | COMBIVERT F6 / S6 (Compact, Application, Pro control boards), software V3.0 |
 | `kollmorgen.md` | AKD with onboard EtherCAT, firmware 1.17 (manual edition P, 2017) |
 | `leadshine.md` | EL8-EC AC servo drives; EM3E-522E/556E/870E EtherCAT stepper drives |
 | `lenze.md` | i550 / i650 motec, i700, i750, i950 (with the "CiA 402 advanced" application) |
@@ -40,7 +41,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Delta, Leadshine, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Delta, Leadshine, KEB, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -52,6 +53,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | Delta ASDA-A3-EP | absent; CW bit 2 ramps on 0x6085, limit switches on the P5.003 time | 0 = coast (no dynamic brake), −1 = dynamic brake | absent | Operation enabled (T3 + T4) | not read |
 | Festo CMMT | absent; ramps on 0x6085, end state not documented | absent; enable off = cat. 1 stop | absent; halt ignored in CSx | Operation enabled (T3 + T4) | not read |
 | HIWIN D-series (2014) | not read | not read | not read | not read | not read |
+| KEB F6 / S6 (V3.0) | 0, −1 to −6 (no 1–8); off unless co32 bit 9; 0, −3, −5 end in Switched on | power off; −1 / 1 = ramp | not mentioned; halt in VL, HM, PP only | not stated | mod-off pause / protection time; brake wait (co21 bit 5) |
 | Kollmorgen AKD | 1, 2, 5, 6; default 2 | absent (0x35FF `DRV.DISMODE`) | absent; bit 8 halts in all modes | not stated | Switched on may already enable the power stage (FBUS.PARAM05 bit 8) |
 | Leadshine EL8-EC / EM3E | 0–3, 5–7 (EM3E also 4); default 2 (EL8), 6 (EM3E); EM3E: an alarm unless 0x22B4 = 1 | EL8: stop by P05.06 (default braking, not coast); EM3E not listed | 1; EL8 halt in CSx unclear | setting: 0x5004:0F bit 2 (EL8 default off) | EM3E brake delays 0x4003 (250 ms each) |
 | Lenze i700 / i750 / i950 | 2, 6; default 2 | torque off (default); 1 = ramp first; absent on i700 | absent; halt ramps to 0 | not stated | waits brake closing time (0x2820:002) |
@@ -85,6 +87,7 @@ the table.
 | Delta ASDA-A3-EP | hard stop + index (direction only in a figure) | 35 only (0x6098 range −4 to 35) | 0.1 rpm; 0x6081 in PUU/s; ramps are ms to 3000 rpm | 0x6093 = E-gear on 2²⁴ pulses/rev; no 0x608F/0x6091/0x6092 | 4 + 4 maps of 8, one of each assigned; default without 0x6060 | 1, 3, 4, 6, 8, 9, 10 |
 | Festo CMMT | fixed stop, negative, index | 37 only | rpm (factory) | 0x60A8–0x60AB, powers of 10; no 0x6091/0x6092 | free 0x1600/0x1A00, 16 each | 0, 1, 3, 4, 6, 8, 9, 10, −3, −20 |
 | HIWIN D-series (2014) | none (1–6, 33, 34) | neither | not read | not read | not read | not read |
+| KEB F6 / S6 (V3.0) | none described | 37 (35 alias), default 37 | rpm / 2ⁿ (co02) | co03 bits/rev (default 16); no 0x6091/0x6092 described | not read (separate fieldbus manual) | 1, 2, 6, 8, 9, 10, −2 (jog); 0x6502 omits 10 |
 | Kollmorgen AKD | reserved; vendor −3 to −7 (switch, set + store, input + feedback zero) | 35 only | 0.001 rpm (pv), or 0x204C | FBUS.PARAM05 bit 4: WorkBench `UNIT` or 0x6091/0x6092 | fixed 0x1701–0x1725 / 0x1B01–0x1B26, or free 4 × 8 bytes, even length | 1, 3, 4, 6, 7, 8 (9, 10 in 0x6060 only); vendor −1 to −3 |
 | Leadshine EL8-EC / EM3E | EL8: torque end stop, positive, + index; EM3E none | both (EM3E: 37 preferred) | EL8 command units/s; EM3E pulses/s | EL8: own 0x6091/0x6092 rule, P00.08 overrides, 10000/rev default; EM3E: microsteps 0x2001 | 0x1600–03 / 0x1A00–01, 8 objects each; EL8 default CSP + probe | EL8 1, 3, 4, 6, 8, 9, 10; EM3E 1, 3, 6, 8 |
 | Lenze i700 / i750 / i950 | none; i950 "advanced": torque end stop, negative | none; "advanced" uses 0 | n-unit: 2³¹ = 480000 rpm | 0x608F, 2¹⁶–2³⁰ inc/rev; no 0x6091/0x6092 | fixed PDO per mode, plus free (i700: 8 objects); default maps 0x60E0/0x60E1 | 2, 8, 9, 10; "advanced" adds 6 |
