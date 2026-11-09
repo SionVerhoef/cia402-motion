@@ -14,6 +14,7 @@ profile pages, and what it adds or leaves out.
 | `lenze.md` | i550 / i650 motec, i700, i750, i950 (with the "CiA 402 advanced" application) |
 | `linmot.md` | C1250-MI, C1251-MI with the CiA 402 interface |
 | `maxon.md` | EPOS4 |
+| `mitsubishi.md` | MR-J4-_TM_ with the ABCC-M40-ECT EtherCAT module (software A0–B4) |
 | `nanotec.md` | CL3-E, NP5 |
 | `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD; Digitax HD M753 (built-in) |
 | `omron.md` | 1S series (R88D-1SN…-ECT) |
@@ -37,7 +38,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -52,6 +53,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | Lenze i700 / i750 / i950 | 2, 6; default 2 | torque off (default); 1 = ramp first; absent on i700 | absent; halt ramps to 0 | not stated | waits brake closing time (0x2820:002) |
 | LinMot C125x-MI | absent | absent | absent | not read | not read |
 | maxon EPOS4 | 6 only | coast, also on T9 | 1 | Operation enabled (T3 + T4) | waits for standstill (0x30E0) |
+| Mitsubishi MR-J4-TM | 2 only; dynamic brake in cst/tq | absent (0x605C, 0x605E too) | 1 only; halt ignored in CSx | Operation enabled (also from Switch on disabled) | homing status up to 50 ms late; hold fault reset 10 ms |
 | Nanotec CL3-E / NP5 | 0, 1, 2 | not read | not read | not read | not read |
 | Nidec SI-EtherCAT | 0, 1, 2, 5, 6; default 2 | ramp, then disable | 0: halt does nothing | Operation enabled (T3 + T4) | 40 ms background loop |
 | Omron 1S | not read | not read | not read | not read | not read |
@@ -82,6 +84,7 @@ the table.
 | Lenze i700 / i750 / i950 | none; i950 "advanced": torque end stop, negative | none; "advanced" uses 0 | n-unit: 2³¹ = 480000 rpm | 0x608F, 2¹⁶–2³⁰ inc/rev; no 0x6091/0x6092 | fixed PDO per mode, plus free (i700: 8 objects); default maps 0x60E0/0x60E1 | 2, 8, 9, 10; "advanced" adds 6 |
 | LinMot C125x-MI | vendor −128 to −111 | not supported | 1 µm/s | vendor parameters | modules + free 0x1620/0x1A20 | 1, 6, 8, 10, 0x8A |
 | maxon EPOS4 | hard stop, positive, index | 37 only | rpm with prefix (0x60A9) | no factor group | not read | 1, 3, 6, 8, 9, 10 |
+| Mitsubishi MR-J4-TM | dog, rear end, then Z, positive (−33 reversed) | both, also with servo off | 0.01 rpm, fixed; ramps are times in ms | 0x6091 = electronic gear; 0x608F/0x6092 read-only; CSx in pulses only | one of 0x1600–03 / 0x1A00–03, 32 objects / 64 bytes | 1, 3, 4, 6, 8, 9, 10, −100, −101, −103 (limited by Pr. PA01) |
 | Nanotec CL3-E / NP5 | block, negative, index | 35 (CL3-E) | rpm (factory) | not read | not read | not read; adds −1, −2 |
 | Nidec SI-EtherCAT | none (0x6098 unsigned) | both (35 legacy) | units per **ms** | 0x6091/0x6092 taken at T3 | one PDO per SM; default vl | 1, 2, 6–10, by host |
 | Omron 1S | not read | not read | not read | 0x6091 (≥ 250 µs), no 0x6092 | fixed + editable 0x1600/0x1A00 | not read |
