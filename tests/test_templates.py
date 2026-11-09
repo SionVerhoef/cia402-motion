@@ -82,7 +82,8 @@ class SimDrive:
     def __init__(self, state=SOD, position=1000, modes=(1, 3, 4, 6, 8, 9, 10),
                  quick_stop_stays=False, settle=1, mode_delay=2, qs_ramp=10,
                  homing_scans=8, home_position=0, homing_phase=0x0400, homing_fails=False,
-                 boot_scans=5, fra_scans=3, jitter=0, refuse=(), ignores_bit_2=False):
+                 boot_scans=5, fra_scans=3, jitter=0, refuse=(), ignores_bit_2=False,
+                 sample=1):
         self.state, self.position, self.modes = state, position, modes
         self.quick_stop_stays, self.settle, self.mode_delay = quick_stop_stays, settle, mode_delay
         self.qs_ramp, self.homing_scans, self.home_position = qs_ramp, homing_scans, home_position
@@ -90,6 +91,9 @@ class SimDrive:
         self.boot_scans, self.fra_scans, self.jitter = boot_scans, fra_scans, jitter
         self.refuse = refuse  # states this drive will not move to when commanded
         self.ignores_bit_2 = ignores_bit_2  # reads controlword bit 2 as 1: no quick stop
+        # Reads 0x6040 and 0x6060, and acts on them, only every `sample` scans: a drive
+        # that handles commands in a slow background loop.
+        self.sample = sample
         self.display = 0
         self.fault_persists = False
         self.override_sw = None
@@ -154,13 +158,15 @@ class SimDrive:
 
         self.recent = (self.recent + [cw])[-self.settle:]
         self.prev_accepted = self.accepted
-        if len(self.recent) == self.settle and len(set(self.recent)) == 1:
+        sampled = self.scan % self.sample == 0
+        if sampled and len(self.recent) == self.settle and len(set(self.recent)) == 1:
             self.accepted = cw
         accepted = self.accepted
 
         # Commanded transitions, then the ones the drive takes by itself.
         word = accepted | 0x04 if self.ignores_bit_2 else accepted
-        new = model_drive(self.state, word, self.prev_accepted, self.quick_stop_stays)
+        new = (model_drive(self.state, word, self.prev_accepted, self.quick_stop_stays)
+               if sampled else self.state)
         if self.state == 'fault' and new != 'fault' and self.fault_persists:
             new = 'fault'
         if new in self.refuse:
@@ -177,7 +183,7 @@ class SimDrive:
         self.mode_queue.append(mode_out)
         if len(self.mode_queue) > self.mode_delay:
             wanted = self.mode_queue.pop(0)
-            if wanted in self.modes and wanted != self.display:
+            if sampled and wanted in self.modes and wanted != self.display:
                 if self.state == OE:
                     self._setpoint_safe(wanted, target, velocity, torque,
                                         f'on the switch to {wanted}')
@@ -1335,6 +1341,57 @@ class Latency(TemplateCase):
                               what='valid or error')
                     rig.enable = False
                     rig.at_rest()
+
+
+class SlowDrive(TemplateCase):
+    """A drive that reads the controlword only every few scans, as Nidec's SI-EtherCAT does in
+    its 40 ms background loop (references/vendors/nidec.md). Every word the FB holds until the
+    statusword confirms it must still reach such a drive, at every phase of its loop, with
+    and without a late statusword: references/state-machine.md, *How long the drive takes*.
+    The FB follows the drive, so its words line up with the drive's loop by themselves; `wait`
+    idle scans before each event the test starts move the event to every phase of the loop."""
+
+    def test_enable_quick_stop_mode_switch_and_reset_with_a_retry(self):
+        for sample, lag in product((4, 8), (0, 3)):
+            for wait in range(sample):
+                with self.subTest(sample_ms=sample * CYCLE, wait=wait, lag=lag):
+                    self.scenario(self.running(lag=lag, sample=sample), wait)
+
+    def scenario(self, rig, wait):
+        d = rig.drive
+        self.assertEqual(d.transitions, plan_transitions(SOD, OE, 'csp'))
+        rig.run(wait)
+        rig.mode = 9
+        rig.valid()
+        rig.mode = 8
+        rig.valid()
+        self.assertEqual(d.display, 8)
+
+        rig.run(wait)
+        mark = len(d.transitions)
+        rig.quick_stop = True
+        rig.at_rest()
+        self.assertEqual(d.transitions[mark:], plan_transitions(OE, 'quick_stop_active')
+                         + plan_transitions('quick_stop_active', SOD))
+        self.assertFalse(rig.out['bError'])
+        rig.quick_stop, rig.enable = False, False
+        rig.scan()
+        rig.enable = True
+        rig.valid()
+
+        rig.run(wait)
+        # A fault that outlasts the first reset attempt: bit 7 must be low for longer than
+        # the drive's loop between two attempts, or the retry is no edge to it.
+        d.fault(persists=True)
+        rig.error(ERR['drive_fault'])
+        rig.run(10 + wait)
+        start = len(rig.words)
+        rig.pulse_reset()
+        rig.until(lambda r: r.fb['eStep'].name == 'ResetPause', what='first attempt failed')
+        d.fault_persists = False
+        rig.valid()
+        self.assertEqual(len(rig.edges_of_bit_7(start)), 2)
+        self.assertIn(('fault', SOD, 0x0080), d.transitions)
 
 
 class Jitter(TemplateCase):
