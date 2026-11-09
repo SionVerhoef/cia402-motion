@@ -12,6 +12,7 @@ profile pages, and what it adds or leaves out.
 | `festo.md` | CMMT-AS (S1, S3), CMMT-ST, firmware V37.1 |
 | `hiwin.md` | D-series EtherCAT drives (2014 guide) |
 | `kollmorgen.md` | AKD with onboard EtherCAT, firmware 1.17 (manual edition P, 2017) |
+| `leadshine.md` | EL8-EC AC servo drives; EM3E-522E/556E/870E EtherCAT stepper drives |
 | `lenze.md` | i550 / i650 motec, i700, i750, i950 (with the "CiA 402 advanced" application) |
 | `linmot.md` | C1250-MI, C1251-MI with the CiA 402 interface |
 | `maxon.md` | EPOS4 |
@@ -39,7 +40,7 @@ profile pages, and what it adds or leaves out.
 ## Porting between drives: where they differ
 
 Two tables, one row per vendor page. Cells are short; the vendor page has the details and the
-source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Delta, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
+source. Read 2026-10-26 (Nidec, Festo, Rexroth, SEW, STOBER, Yaskawa, Mitsubishi, Delta, Leadshine, Kollmorgen, the Lenze manuals and Beckhoff AX8000 2026-11-08); tables last updated 2026-11-08. "not read" means the
 documents read did not cover it; "absent" means the object is not in the drive's dictionary.
 
 ### Stopping and the state machine
@@ -52,6 +53,7 @@ documents read did not cover it; "absent" means the object is not in the drive's
 | Festo CMMT | absent; ramps on 0x6085, end state not documented | absent; enable off = cat. 1 stop | absent; halt ignored in CSx | Operation enabled (T3 + T4) | not read |
 | HIWIN D-series (2014) | not read | not read | not read | not read | not read |
 | Kollmorgen AKD | 1, 2, 5, 6; default 2 | absent (0x35FF `DRV.DISMODE`) | absent; bit 8 halts in all modes | not stated | Switched on may already enable the power stage (FBUS.PARAM05 bit 8) |
+| Leadshine EL8-EC / EM3E | 0–3, 5–7 (EM3E also 4); default 2 (EL8), 6 (EM3E); EM3E: an alarm unless 0x22B4 = 1 | EL8: stop by P05.06 (default braking, not coast); EM3E not listed | 1; EL8 halt in CSx unclear | setting: 0x5004:0F bit 2 (EL8 default off) | EM3E brake delays 0x4003 (250 ms each) |
 | Lenze i700 / i750 / i950 | 2, 6; default 2 | torque off (default); 1 = ramp first; absent on i700 | absent; halt ramps to 0 | not stated | waits brake closing time (0x2820:002) |
 | LinMot C125x-MI | absent | absent | absent | not read | not read |
 | maxon EPOS4 | 6 only | coast, also on T9 | 1 | Operation enabled (T3 + T4) | waits for standstill (0x30E0) |
@@ -84,6 +86,7 @@ the table.
 | Festo CMMT | fixed stop, negative, index | 37 only | rpm (factory) | 0x60A8–0x60AB, powers of 10; no 0x6091/0x6092 | free 0x1600/0x1A00, 16 each | 0, 1, 3, 4, 6, 8, 9, 10, −3, −20 |
 | HIWIN D-series (2014) | none (1–6, 33, 34) | neither | not read | not read | not read | not read |
 | Kollmorgen AKD | reserved; vendor −3 to −7 (switch, set + store, input + feedback zero) | 35 only | 0.001 rpm (pv), or 0x204C | FBUS.PARAM05 bit 4: WorkBench `UNIT` or 0x6091/0x6092 | fixed 0x1701–0x1725 / 0x1B01–0x1B26, or free 4 × 8 bytes, even length | 1, 3, 4, 6, 7, 8 (9, 10 in 0x6060 only); vendor −1 to −3 |
+| Leadshine EL8-EC / EM3E | EL8: torque end stop, positive, + index; EM3E none | both (EM3E: 37 preferred) | EL8 command units/s; EM3E pulses/s | EL8: own 0x6091/0x6092 rule, P00.08 overrides, 10000/rev default; EM3E: microsteps 0x2001 | 0x1600–03 / 0x1A00–01, 8 objects each; EL8 default CSP + probe | EL8 1, 3, 4, 6, 8, 9, 10; EM3E 1, 3, 6, 8 |
 | Lenze i700 / i750 / i950 | none; i950 "advanced": torque end stop, negative | none; "advanced" uses 0 | n-unit: 2³¹ = 480000 rpm | 0x608F, 2¹⁶–2³⁰ inc/rev; no 0x6091/0x6092 | fixed PDO per mode, plus free (i700: 8 objects); default maps 0x60E0/0x60E1 | 2, 8, 9, 10; "advanced" adds 6 |
 | LinMot C125x-MI | vendor −128 to −111 | not supported | 1 µm/s | vendor parameters | modules + free 0x1620/0x1A20 | 1, 6, 8, 10, 0x8A |
 | maxon EPOS4 | hard stop, positive, index | 37 only | rpm with prefix (0x60A9) | no factor group | not read | 1, 3, 6, 8, 9, 10 |
