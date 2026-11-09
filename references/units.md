@@ -26,16 +26,19 @@ turn. Set 0x6092 = 10,000 : 1, and 10,000 units then make 1,048,576 increments: 
 
 Where the factor group is missing, the drive works in increments, or in its own unit objects.
 Some drives use SI-unit objects (0x60A8 position, 0x60A9 velocity). Others put the gear in a
-manufacturer object, or allow it only at some cycle times. The vendor pages have the cases read
-for this skill. Ask **ethercat-esi** which of these objects a particular drive has.
+manufacturer object, or allow it only at some cycle times. Festo CMMT, for one, has no 0x608F,
+0x6091 or 0x6092 and sets units only through 0x60A8–0x60AB, in powers of ten
+(`vendors/festo.md`). The vendor pages have the cases read for this skill. Ask **ethercat-esi** which of these objects a particular drive has.
 
 The velocity unit differs between drives. Some use user units per second, scaled by 0x6096.
-maxon EPOS4, Synapticon and Nanotec's NP5 default to **rpm** through 0x60A9 (vendor pages).
+maxon EPOS4, Synapticon and Nanotec's NP5 default to **rpm** through 0x60A9 (vendor pages), and
+Festo CMMT is set to rpm at the factory (`vendors/festo.md`).
 Masters differ in what they assume too. Read 0x60A9, 0x6096 or the manual, set the unit
 explicitly, and test with a slow move of known length.
 
 Torque and current are in thousandths of the rated values 0x6076 (mN·m) and 0x6075 (mA): 1000 is
-rated torque.
+rated torque. Not every drive follows this. Festo CMMT refers torque objects to the gear output
+shaft by default and maps 0x6076 to the motor's nominal current (`vendors/festo.md`).
 
 ## The 32-bit budget
 
