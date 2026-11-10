@@ -119,6 +119,48 @@ enabled and the motion resumes when bit 8 drops. Quick stop is for abnormal stop
 0x000F brings the drive back (T16) depends on 0x605A. Neither is a safety function:
 `safety-boundary.md`.
 
+## How long the drive takes
+
+A transition is not done in one bus cycle. Two delays add up, and neither shows up in a
+simulation that answers on the next scan:
+
+- **Before the drive acts.** Many drives do not handle the controlword in the bus cycle. They
+  read it in a slower internal loop. Nidec's SI-EtherCAT handles state changes and 0x6060 in a
+  40 ms background loop; only quick stop and shutdown in CSP, CSV, CST and homing are
+  faster (`vendors/nidec.md`). Some transitions wait for the motor: maxon EPOS4 holds every exit from
+  Operation enabled until its standstill window (0x30E0) says the axis has stopped
+  (`vendors/maxon.md`). KEB holds Enable operation until a modulation-off time has run out
+  (`vendors/keb.md`).
+- **Before the statusword shows it.** The statusword can be older than the bus cycle that
+  carries it. Nidec refreshes it every 40 ms. Mitsubishi's MR-J4-TM can report bit 4 up to
+  50 ms late (`vendors/mitsubishi.md`). The bus adds its own cycle or two on top.
+
+What follows for master code:
+
+- **Wait for the state, never for a time.** A fixed delay that works on the bench fails on a
+  slower drive or a busier bus. It also fails silently: the next command lands in the wrong
+  state. Nidec's guide says the same. A delay the manual asks for *after* a state has been
+  confirmed is a different thing, and it comes on top: Panasonic's MINAS A6BN wants about
+  100 ms in Operation enabled before the first motion command (`vendors/panasonic.md`).
+- **Size every timeout from both delays.** The drive's loop time, plus any standstill or
+  ramp it waits for, plus how late its statusword can be, plus the bus, with a margin on top.
+  A timeout is there to catch a drive that will not move. It does not tell you how fast a
+  drive should be. Timeouts measured in a few bus cycles are too short for most drives.
+- **Hold every word until it is confirmed** (rule 1 below). A word written for one cycle can
+  fall between two reads of a slow drive and never reach it.
+- **A fault reset needs bit 7 low for at least one of the drive's reads before the edge.**
+  The edge exists only between two reads. If bit 7 goes high again before the drive has read
+  it low, the drive sees no edge, and the retry does nothing. So the time bit 7 is low between
+  two attempts must be longer than the drive's loop. Mitsubishi asks for bit 7 held high for
+  at least 10 ms over an unreliable link (`vendors/mitsubishi.md`). Holding it high until the
+  drive leaves Fault covers both.
+
+`FB_Cia402Axis` waits for the statusword in every step. It holds bit 7 high until the drive
+leaves Fault or `tStateTimeout` runs out. It keeps bit 7 low for 20 ms plus `tResetPause`
+between two attempts. Its defaults (2 s and 1 s) leave room for a slow drive. If you shorten
+them, keep `tResetPause` longer than the drive's loop. Its tests run it against a drive that
+reads the controlword only every 40 and 80 ms (`../tests/test_templates.py`, `SlowDrive`).
+
 ## Rules for code that drives the FSA
 
 These are what to check in any master code, PLC function block or script, including your own.
