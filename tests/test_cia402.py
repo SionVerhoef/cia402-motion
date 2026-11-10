@@ -819,6 +819,139 @@ class Output(unittest.TestCase):
             f.read().decode('ascii')
 
 
+def trace_of(text):
+    """cia402.trace() of a CSV log given as text."""
+    samples, columns = cia402.read_trace(text.strip().splitlines())
+    return cia402.trace(samples, columns)
+
+
+def rules_of(result, level=None):
+    return [f['rule'] for f in result['findings'] if level in (None, f['level'])]
+
+
+# A master that does everything right: a fault reset held until the drive leaves Fault
+# and released one sample later, each command held until the statusword confirms it,
+# PP's bit 4 only once 0x6061 shows mode 1, and a stop by Disable operation (T5).
+CLEAN = """
+Time,Controlword,Statusword,Modes of operation,Modes of operation display
+0.000,0x0000,0x0218,1,1
+0.001,0x0080,0x0218,1,1
+0.002,0x0080,0x0218,1,1
+0.003,0x0080,0x0250,1,1
+0.004,0x0000,0x0250,1,1
+0.005,0x0006,0x0250,1,1
+0.006,0x0006,0x0250,1,1
+0.007,0x0006,0x0231,1,1
+0.008,0x0007,0x0231,1,1
+0.009,0x0007,0x0233,1,1
+0.010,0x000F,0x0233,1,1
+0.011,0x000F,0x0237,1,1
+0.012,0x001F,0x1237,1,1
+0.013,0x000F,0x0637,1,1
+0.014,0x0007,0x0637,1,1
+0.015,0x0007,0x0233,1,1
+"""
+
+
+class Trace(unittest.TestCase):
+
+    def test_a_clean_log_has_no_errors_or_warnings(self):
+        r = trace_of(CLEAN)
+        self.assertEqual(r['samples'], 16)
+        self.assertEqual(rules_of(r, 'error') + rules_of(r, 'warning'), [])
+        self.assertEqual(r['counts']['note'], 1)  # starts in Fault: read 0x603F
+        changes = [e['transitions'] for e in r['events'] if e['transitions']]
+        self.assertEqual(changes, [[15], [2], [3], [4], [5]])
+
+    def test_each_rule_is_flagged_once(self):
+        r = trace_of("""
+Name;an export from a scope, with lines above the header
+Time;MAIN.fbAxis.nControlword;MAIN.fbAxis.nStatusword;0x6060;0x6061
+0,000;0;0x0218;8;8
+0,001;0x008F;0x0218;8;8
+0,002;0x008F;0x0250;8;8
+0,003;0x008F;0x0250;8;8
+0,004;0x000F;0x0250;8;8
+0,005;0x000F;0x0250;8;8
+0,006;6;0x0250;8;8
+0,007;7;0x0250;8;8
+0,008;7;0x0233;8;8
+0,009;0x000F;0x0233;6;8
+0,010;0x001F;0x0237;6;8
+0,011;0x001F;0x0237;6;6
+0,012;0;0x0237;6;6
+0,013;0;0x0250;6;6
+""")
+        self.assertEqual(rules_of(r, 'error'), [2, 2, 1, 7])
+        self.assertEqual(rules_of(r, 'warning'), [8, 5])
+        by_rule = {f['rule']: f for f in r['findings'] if f['rule']}
+        self.assertEqual(by_rule[1]['time'], '0,007')
+        self.assertIn('0x0006 (Shutdown) replaced by 0x0007', by_rule[1]['message'])
+        self.assertEqual(by_rule[7]['line'], 13)
+        self.assertEqual(r['events'][-1]['transitions'], [9])
+
+    def test_bit_7_for_one_sample_after_the_reset_is_the_masters_reaction(self):
+        r = trace_of("""
+controlword,statusword
+0x0080,0x0218
+0x0080,0x0250
+0x0000,0x0250
+""")
+        self.assertEqual(rules_of(r, 'error'), [])
+
+    def test_a_command_with_nothing_to_confirm_may_change(self):
+        # 0x000F in Switch on disabled commands nothing, so replacing it at once with
+        # 0x0006 is the fix, not a broken hold.
+        r = trace_of("""
+6040,6041
+0x000F,0x0250
+0x0006,0x0250
+""")
+        self.assertEqual(rules_of(r), [])
+
+    def test_a_fault_mid_run_is_t13_t14_and_a_note(self):
+        r = trace_of("""
+6040,6041
+0x000F,0x0237
+0x000F,0x0218
+""")
+        self.assertEqual(r['events'][-1]['transitions'], [13, 14])
+        self.assertEqual(rules_of(r, 'note'), [None])
+        self.assertIn('0x603F', r['findings'][0]['message'])
+
+    def test_a_non_standard_statusword_reads_as_fault(self):
+        r = trace_of("""
+6040,6041
+0x000F,0x0068
+""")
+        self.assertEqual(r['events'][0]['state'], 'fault')
+        self.assertTrue(r['events'][0]['nonstandard'])
+
+    def test_rule_7_needs_both_mode_columns(self):
+        r = trace_of("""
+6040,6041,6061
+0x001F,0x0237,8
+""")
+        self.assertEqual(rules_of(r), [])
+        self.assertIn('Rule 7', r['notes'][0])
+
+    def test_cells_from_a_scope_export(self):
+        # Empty cells repeat the value above (a slower channel); whole floats are fine;
+        # a statusword with bit 15 recorded as INT16 is read back as the word.
+        samples, columns = cia402.read_trace([
+            'Time\tStatusword\tControlword', '0.0\t\t0x0006', '0.1\t592.0\t',
+            '0.2\t-32176\t'])
+        self.assertEqual(columns, {'time': 'Time', 'sw': 'Statusword', 'cw': 'Controlword'})
+        self.assertEqual([(s['cw'], s['sw']) for s in samples],
+                         [(0x0006, 0x0250), (0x0006, 0x8250)])
+
+    def test_unreadable_logs_are_errors(self):
+        for lines in (['a,b', '1,2'], ['6040,6041'], ['6040,6041', '0x0006,1.5']):
+            with self.subTest(lines=lines):
+                with self.assertRaises(ValueError):
+                    cia402.read_trace(lines)
+
+
 class CommandLine(unittest.TestCase):
 
     CASES = [
@@ -880,6 +1013,25 @@ class CommandLine(unittest.TestCase):
                           '--tx', '6041', '6064'])
         self.assertEqual(r.returncode, 0)
         self.assertIn(b'never confirmed', r.stdout)
+
+    def test_trace_exits_1_on_an_error_and_reads_utf16(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            clean, broken = os.path.join(d, 'clean.csv'), os.path.join(d, 'broken.csv')
+            with open(clean, 'w', encoding='utf-16') as f:
+                f.write(CLEAN.strip())
+            with open(broken, 'w') as f:
+                f.write('6040,6041\n0x008F,0x0218\n')
+            r = self.run_cli(['trace', clean])
+            self.assertEqual(r.returncode, 0, r.stderr)
+            r.stdout.decode('ascii')
+            self.assertIn(b'T15', r.stdout)
+            r = self.run_cli(['trace', broken, '--json'])
+            self.assertEqual(r.returncode, 1)
+            self.assertEqual(json.loads(r.stdout)['counts']['error'], 1)
+            r = self.run_cli(['trace', os.path.join(d, 'missing.csv')])
+            self.assertEqual(r.returncode, 2)
+            self.assertIn(b'cannot read', r.stderr)
 
     def test_repeated_pdo_options_add_up(self):
         r = self.run_cli(['pdo', '--mode', 'csp', '--rx', '6040', '--rx', '607A',
