@@ -419,8 +419,9 @@ def log_homing_to_csp_fault(t, code):
             has(t, r"switch[\s-]+on[\s-]+disabled", r"0x0250|16#0250")
             and all(has(t, hexv(n)) for n in (6, 7, 0xF)),
     }
+    # The window or limit itself: 'the drive raises a following error' is not advice to widen it.
     tuning = advises(t, r"\b(rais|increas|widen|enlarg|loosen|open)\w*\s+(\w+\s+){0,4}"
-                        r"(following[\s-]+error|(0x)?606[56]\b|window)",
+                        r"((0x)?606[56]\b|window|following[\s-]+error\s+(limit|tolerance|threshold))",
                      r"\bretun\w*", r"\b(rais|increas|lower|reduc)\w*\s+(\w+\s+){0,3}gains?\b")
     if tuning:
         return "W", c

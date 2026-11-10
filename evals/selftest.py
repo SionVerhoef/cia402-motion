@@ -413,6 +413,11 @@ REGRESSIONS = [
      "- Do not raise the following-error window 0x6065: the target 0x607A was left at 1,250,000 "
      "while the actual is 0.\n- The drive is in Switch on disabled after the reset, so send 0x0006, "
      "0x0007, then 0x000F."),
+    ("log-homing-to-csp-fault", "R", "the drive 'raises a following error' (Opus 5.5 skill arm, v0.2)",
+     "Don't raise 0x6065. The CSP target is stale after homing. You enter CSP with 0x607A = 1 250 000, but homing has just set the actual "
+     "position to 0. The drive sees a 1.25 million-count step, raises a following error and faults "
+     "with 0x8611. After the reset you send 0x000F straight from Switch on disabled; the drive needs "
+     "0x0006 and then 0x0007 first."),
     ("units-endless-rotary-wrap", "R", "'the rescaling will not fix it'",
      "The DINT position wraps past 2^31 after 20 minutes. The rescaling will not fix it; it just "
      "delays the wrap to about 10 hours. Use CSV for the drum."),

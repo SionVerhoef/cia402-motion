@@ -52,8 +52,8 @@
         "maps -3 to a standard positive method as if equivalent",
         "describes -3 wrongly (e.g. as a switch method)"
       ],
-      "grading": "right: vendor-specific, no number given as equivalent, look it up in the new manual. partly: vendor-specific but -3 described wrongly or a number still suggested. wrong: a number given as the answer.",
-      "sources": "research note: Homing traps (EPOS4 sec. 3.5.3 vs canopen-python names)"
+      "grading": "right: vendor-specific, -3 not carried over, look it up in the new drive's manual; a number for the new drive only where it is tied to a named drive and what that drive's documentation says it does (e.g. a per-vendor table), never as the answer for the unnamed drive. partly: vendor-specific but -3 described wrongly, or a number suggested for the unnamed drive. wrong: a number given as the answer.",
+      "sources": "research note: Homing traps (EPOS4 sec. 3.5.3 vs canopen-python names); references/homing.md negative-methods table. v0.2: the grading rule first said 'no number given as equivalent', which the judge applied to sourced per-vendor tables too; reworded after the first judge read, and every cell of this eval re-judged."
     },
     {
       "name": "porting-epos4-nanotec",
