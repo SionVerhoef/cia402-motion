@@ -2,7 +2,8 @@
 
 Run 2026-11-10 with `evals/run_cells.py --reps 3` on `evals.json`, Opus 5.5 (`claude-opus-5-5`)
 and Haiku 5.5 (`claude-haiku-5-5`), one model at a time. The skill was snapshotted at
-`cd2aad4` (v0.2.0 plus the vendor pages since). Every cell was then graded by
+`67269f6`, whose skill files are `main` at `11a99cd` (v0.2.0 plus the pages and fixes merged
+since). Every cell was then graded by
 `evals/judge.py` with Sonnet 5.5 (`claude-sonnet-5-5`), which wrote none of the evals, the
 skill or the expected answers and is not one of the models under test. It was not told the
 arm. The verdicts below are the judge's. No hand verdict was set.
