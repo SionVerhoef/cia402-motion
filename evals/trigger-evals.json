@@ -114,5 +114,37 @@
   {
     "query": "AX5000 over SoE in TwinCAT: what do IDN S-0-0134 and S-0-0135 do, and how do I read the drive's diagnostic message?",
     "should_trigger": false
+  },
+  {
+    "query": "TwinCAT 3 NC axis: during MC_MoveAbsolute at 800 mm/s the axis trips with a position lag error. Which axis parameters set the lag monitoring window and filter time, and should I raise them or fix the dynamics?",
+    "should_trigger": false
+  },
+  {
+    "query": "EtherCAT: reading object 0x1018 by SDO from one slave aborts with code 0x06020000 while every other slave answers. What does that abort code mean and how do I narrow it down?",
+    "should_trigger": false
+  },
+  {
+    "query": "TwinCAT refuses to import the ESI XML a servo drive vendor sent us: 'invalid DC OpMode in device description'. Is the file broken, and can I fix the XML myself?",
+    "should_trigger": false
+  },
+  {
+    "query": "Allen-Bradley Kinetix 5700 on CIP Motion in Studio 5000: after MAH homing the axis faults with excessive position error the first time we run MAM. What should I check in the axis configuration?",
+    "should_trigger": false
+  },
+  {
+    "query": "Sizing a servo motor for a 50 kg belt-driven linear axis: 1 m/s, 0.2 s accel, 40 mm pulley. What torque and inertia ratio should I aim for, and do I need a gearbox?",
+    "should_trigger": false
+  },
+  {
+    "query": "Pilz PNOZmulti safety controller: how do I configure safely-limited speed for a robot cell door in setup mode, with the speed coming from an encoder on the motor?",
+    "should_trigger": false
+  },
+  {
+    "query": "CODESYS SoftMotion: my SM3 axis homes with MC_Home but always goes in the wrong direction and ignores the reference switch. Where do I set the homing direction and switch in the axis configuration?",
+    "should_trigger": false
+  },
+  {
+    "query": "Servo axis on a long ball screw sings at around 300 Hz when I raise the velocity loop gain. How do I find the resonance and set a notch filter, and how much gain can I get back?",
+    "should_trigger": false
   }
 ]
