@@ -24,6 +24,10 @@ jobs:
       - name: no real network identities committed
         run: python scripts/check_private.py
 
+      # Every vendor page says when its source was read; older than a year only warns.
+      - name: vendor pages carry a read date
+        run: python scripts/check_vendor_dates.py
+
       # Manuals and specs are copyrighted and must never land here (see CLAUDE.md).
       - name: no PDFs committed
         run: |
