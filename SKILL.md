@@ -54,6 +54,7 @@ unless it was run on hardware.
 python3 scripts/cia402.py plan 0x0218 --mode csp     # controlwords from here to Operation enabled
 python3 scripts/cia402.py plan oe sod                # ...or to any state that can be commanded
 python3 scripts/cia402.py pdo --mode hm,csp --rx 6040 6060 607A --tx 6041 6061 6064
+python3 scripts/cia402.py trace scope.csv            # a recorded controlword/statusword log
 ```
 
 - **`plan`** gives the controlword sequence from any state, or from a statusword value, to any
@@ -62,6 +63,11 @@ python3 scripts/cia402.py pdo --mode hm,csp --rx 6040 6060 607A --tx 6041 6061 6
   code you write. `--quick-stop-stays` when 0x605A keeps the drive in Quick stop active.
 - **`pdo`** checks a mapping against the modes an axis runs in. Exit 1 on an error:
   `references/pdo-mapping.md`.
+- **`trace`** reads a CSV log of 0x6040 and 0x6041 (optionally 0x6060, 0x6061, time), such
+  as a TwinCAT Scope export. It lists each state change with its transition number and flags
+  where the master breaks the rules of `references/state-machine.md`: a command not held until
+  confirmed, bit 7 held or ORed into 0x000F, T9, mode bits before 0x6061, 0x000F in Switch on
+  disabled. Use it whenever the user has a log, rather than reading the words by eye.
 - `decode sw|cw|modes|mode|method <value> [--mode m]`: for a non-standard statusword such as
   0x0068, or to check bit arithmetic.
 

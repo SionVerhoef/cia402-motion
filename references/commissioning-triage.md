@@ -12,7 +12,9 @@ later step's advice is wrong while an earlier one is still open.
 - 0x6060 and 0x6061, 0x603F, and the PDO mapping
 - what changed since it last worked
 
-Decode with the tool, not by eye: `cia402.py decode sw <word> [--mode m]`.
+Decode with the tool, not by eye: `cia402.py decode sw <word> [--mode m]` for one word, and
+`cia402.py trace <log.csv>` for a recording of both words, which also flags where the master
+breaks the rules of `state-machine.md`.
 
 ## 0. Is the bus up?
 

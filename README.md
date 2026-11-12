@@ -83,6 +83,7 @@ python3 scripts/cia402.py decode sw 0x1637 --mode hm
 python3 scripts/cia402.py decode cw 0x001F --mode pp
 python3 scripts/cia402.py plan fault --mode csp     # controlword sequence, with the CSP set-up
 python3 scripts/cia402.py pdo --mode hm,csp --rx 6040 6060 607A --tx 6041 6061 6064
+python3 scripts/cia402.py trace scope.csv           # each state change in a recorded log
 ```
 
 - **`decode`** reads a statusword (0x6041), controlword (0x6040), supported-modes bitmap
@@ -100,6 +101,12 @@ python3 scripts/cia402.py pdo --mode hm,csp --rx 6040 6060 607A --tx 6041 6061 6
   or with the wrong length, and touch probes armed but never read. Each axis of a multi-axis
   device is checked on its own. Entries can be pasted as the 32-bit values read from a mapping
   object. It exits 1 on an error, so it can gate a build.
+- **`trace`** reads a CSV log with a controlword and a statusword column (6040/6041 or by
+  name; 6060, 6061 and a time column if present), such as a TwinCAT Scope export with `,`, `;`
+  or tab. It lists every change of command, state and mode with its transition number, and
+  flags a command replaced before the statusword confirmed it, bit 7 held after the reset or
+  ORed into 0x000F, Disable voltage in Operation enabled (T9), mode-specific bits before 0x6061
+  confirms the mode, and 0x000F held in Switch on disabled. It exits 1 on an error.
 
 Add `--json` for machine-readable output.
 

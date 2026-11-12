@@ -223,4 +223,5 @@ correctly in prose. Rule 9 came from this skill's own template.
 `cia402.py plan` follows the first eight and notes rule 9 where its path has T7 or T10. It keeps
 0x0000 there, for a caller with no word with bit 3 left to land. `cia402.py decode cw <word>`
 names the command a word actually sends, which catches 0x000B (quick stop, because bit 2 is 0)
-and 0x008F (bit 7 with the enable bits).
+and 0x008F (bit 7 with the enable bits). `cia402.py trace <log.csv>` checks rules 1, 2, 5, 7
+and 8 in a recording of the words a master sent and the statuswords it got back.

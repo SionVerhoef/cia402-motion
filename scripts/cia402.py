@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Decode CiA 402 drive words, plan state-machine transitions and check PDO mappings.
+"""Decode CiA 402 drive words, plan state-machine transitions, check PDO mappings and
+trace a recorded log.
 
     cia402.py decode sw 0x1637 --mode pp      statusword (0x6041), mode-aware
     cia402.py decode cw 0x001F --mode pp      controlword (0x6040)
@@ -11,6 +12,8 @@
     cia402.py plan sod --mode csp             with the mode switch and the CSP set-up
     cia402.py pdo --mode csp --rx 6040 607A --tx 6041 6064
                                               check a PDO mapping against the modes
+    cia402.py trace scope.csv                 a recorded controlword/statusword log:
+                                              each state change, and the rules it breaks
 
 --json prints the same result for a program. A value is decimal, 0x or 16# hex, or
 0b or 2# binary; underscores are ignored, so 2#0001_0110 works. PDO entries are object
@@ -21,6 +24,7 @@ Bit numbers, object indices and code values are facts of the profile; every labe
 and note here is original wording.
 """
 import argparse
+import csv
 import heapq
 import json
 import sys
@@ -1068,6 +1072,225 @@ def check_pdo(rx, tx, modes):
             'counts': {level: sum(f['level'] == level for f in findings) for level in LEVELS}}
 
 
+# --- Trace --------------------------------------------------------------------------
+
+# Columns of a recorded log, found by name once everything but letters and digits is
+# gone, so a TwinCAT Scope channel such as MAIN.fbAxis.stIn.nStatusword is found too.
+# The display comes before the mode: 'modesofoperation' is inside its name.
+TRACE_COLUMNS = (
+    ('cw', ('6040', 'controlword')),
+    ('sw', ('6041', 'statusword')),
+    ('display', ('6061', 'modesofoperationdisplay', 'modedisplay')),
+    ('mode', ('6060', 'modesofoperation')),
+    ('time', ('time',)),
+)
+MODE_CW_MASK = 0x0270  # controlword bits 4, 5, 6 and 9
+FAULT_STATES = ('fault', 'fault_reaction_active')
+
+
+def _trace_columns(cells):
+    """{key: column index} for the cells of one header row."""
+    found = {}
+    for i, cell in enumerate(cells):
+        name = ''.join(c for c in cell.lower() if c.isalnum())
+        for key, patterns in TRACE_COLUMNS:
+            if key not in found and any(p in name for p in patterns):
+                found[key] = i
+                break
+    return found
+
+
+def _log_number(text, where):
+    """An integer cell, or None for an empty one. Scope may write 1591.0 or 1591,0."""
+    t = text.strip()
+    if not t:
+        return None
+    try:
+        return parse_number(t)
+    except ValueError:
+        pass
+    try:
+        f = float(t.replace(',', '.'))
+        if f == int(f):
+            return int(f)
+    except (ValueError, OverflowError):
+        pass
+    raise ValueError(f'{where}: {text!r} is not a whole number')
+
+
+def read_trace(lines):
+    """(samples, columns) from the lines of a CSV log. The header is the first line with
+    a controlword and a statusword column, so metadata lines above it are skipped. An
+    empty cell repeats the value above it, as a channel recorded more slowly leaves."""
+    header = None
+    for n, line in enumerate(lines[:50]):
+        for delimiter in (',', ';', '\t'):
+            cells = next(csv.reader([line], delimiter=delimiter), [])
+            cols = _trace_columns(cells)
+            if 'cw' in cols and 'sw' in cols:
+                header = n, delimiter, cells, cols
+                break
+        if header:
+            break
+    if not header:
+        raise ValueError('no header line with a controlword and a statusword column in the '
+                         'first 50 lines. Name them 6040 / 6041 or controlword / statusword '
+                         '(optionally 6060, 6061 and a time column)')
+    n, delimiter, cells, cols = header
+    columns = {key: cells[i].strip() for key, i in cols.items()}
+    samples, last = [], {}
+    for offset, row in enumerate(csv.reader(lines[n + 1:], delimiter=delimiter)):
+        line_no = n + 2 + offset
+        if not any(c.strip() for c in row):
+            continue
+        for key in ('cw', 'sw', 'mode', 'display'):
+            if key not in cols:
+                continue
+            cell = row[cols[key]] if cols[key] < len(row) else ''
+            value = _log_number(cell, f'line {line_no}, {columns[key]}')
+            if value is None:
+                continue
+            where = f'line {line_no}: {columns[key]}'
+            if key in ('cw', 'sw'):
+                last[key] = _word(value, 16, where)[0]
+            else:
+                last[key] = _signed8(value, where)[0]
+        if 'cw' not in last or 'sw' not in last:
+            continue  # nothing recorded yet for one of the two words
+        time = row[cols['time']].strip() if 'time' in cols and cols['time'] < len(row) else ''
+        samples.append({'line': line_no, 'time': time or f'#{line_no}', 'cw': last['cw'],
+                        'sw': last['sw'], 'mode': last.get('mode'),
+                        'display': last.get('display')})
+    if not samples:
+        raise ValueError('the log has a header but no samples')
+    return samples, columns
+
+
+def _state_of(sw):
+    """The state a statusword shows, a non-standard one read as decode does, or None."""
+    return match_state(sw) or _nearest_state(sw)[0]
+
+
+def _transitions_between(a, b):
+    """Transition numbers that take the drive from state a to state b, or []."""
+    if b == 'fault_reaction_active':
+        return [13]
+    if b == 'fault' and a != 'fault_reaction_active':
+        return [13, 14]  # the fault reaction fell between two samples
+    return [t['id'] for t in TRANSITIONS if t['from'] == a and t['to'] == b]
+
+
+def _target_of(state, cw):
+    """The state a controlword commands from state, or None if it commands nothing there."""
+    for t in TRANSITIONS:
+        if t['id'] in controlword_command(cw)[1] and t['from'] == state \
+                and t['controlword'] is not None:
+            return t['to']
+    return None
+
+
+def _state_label(key):
+    return STATES[key]['name'] if key else 'no state'
+
+
+def trace(samples, columns=()):
+    """Every change of controlword, state and mode in a log, and where the master breaks
+    the rules of references/state-machine.md."""
+    events, findings, notes = [], [], []
+    active = {}
+
+    def rising(key, condition):
+        """True on the first sample of a run where condition holds: one finding a run."""
+        was = active.get(key, False)
+        active[key] = bool(condition)
+        return condition and not was
+
+    def add(level, rule, s, message):
+        findings.append({'level': level, 'rule': rule, 'line': s['line'],
+                         'time': s['time'], 'message': message})
+
+    check_mode = 'mode' in columns and 'display' in columns
+    prev, prev_state, held, bit7_outside, sod_enable = None, None, None, 0, 0
+    for i, s in enumerate(samples):
+        cw, sw = s['cw'], s['sw']
+        state = _state_of(sw)
+        command = controlword_command(cw)[0]
+        new_state = prev is None or state != prev_state
+        if new_state or any(s[k] != prev[k] for k in ('cw', 'mode', 'display')):
+            events.append({
+                'line': s['line'], 'time': s['time'],
+                'cw': cw, 'cw_hex': f'0x{cw:04X}', 'command': command,
+                'sw': sw, 'sw_hex': f'0x{sw:04X}', 'state': state,
+                'state_name': _state_label(state), 'nonstandard': match_state(sw) is None,
+                'mode': s['mode'], 'display': s['display'],
+                'transitions': (_transitions_between(prev_state, state)
+                                if prev is not None and new_state else None)})
+
+        if rising('fault', state in FAULT_STATES):
+            add('note', None, s, f'{_state_label(state)} (statusword 0x{sw:04X}): read '
+                                 f'0x603F for the error code.')
+
+        # Rule 1: a command is held until the statusword shows the state it commands.
+        if held and state != held['state']:
+            held['left'] = True
+        if held is None or command != held['command']:
+            if held and held['target'] and not held['left'] \
+                    and held['command'] != 'Fault reset':
+                n = i - held['index']
+                add('error', 1, s,
+                    f'0x{held["cw"]:04X} ({held["command"]}) replaced by 0x{cw:04X} '
+                    f'({command}) after {n} sample{"s" if n != 1 else ""}, while the drive '
+                    f'was still in {_state_label(held["state"])}, before it showed '
+                    f'{_state_label(held["target"])}. Hold each command until the '
+                    f'statusword confirms it (rule 1).')
+            held = {'index': i, 'cw': cw, 'command': command, 'state': state,
+                    'target': _target_of(state, cw), 'left': False}
+
+        # Rule 2: bit 7 only on its own, and released once the drive is out of Fault.
+        if prev is None or cw != prev['cw']:
+            if cw & 0x80 and cw & 0x0F:
+                add('error', 2, s, f'0x{cw:04X} sets bit 7 together with bits 0-3: fault '
+                                   f'reset is bit 7 alone. Never OR it into 0x000F (rule 2).')
+        bit7_outside = bit7_outside + 1 if cw & 0x80 and state not in FAULT_STATES else 0
+        # One sample is the master's reaction time to the statusword; two is holding.
+        if rising('bit7', bit7_outside >= 2):
+            add('error', 2, s, f'Bit 7 still high in {_state_label(state)}: release it once '
+                               f'the drive has left Fault. Every other command needs bit '
+                               f'7 = 0, so it blocks the next one (rule 2).')
+
+        # Rule 5: Disable voltage in Operation enabled is T9.
+        if rising('t9', state == 'operation_enabled' and not cw & 0x02):
+            add('warning', 5, s, f'0x{cw:04X} (Disable voltage) in Operation enabled is T9: '
+                                 f'the power stage switches off at once and a hanging axis '
+                                 f'depends on its brake. Stop with T5 (0x0007) or T8 '
+                                 f'(0x0006) (rule 5).')
+
+        # Rule 7: mode-specific bits only once 0x6061 shows the mode 0x6060 asks for.
+        if check_mode and rising('mode', cw & MODE_CW_MASK and s['mode'] != s['display']):
+            add('error', 7, s, f'Mode-specific {_bits([b for b in MODE_CW_BITS if cw & (1 << b)])} set '
+                               f'while 0x6061 shows {s["display"]} and 0x6060 asks for '
+                               f'{s["mode"]}: wait until 0x6061 confirms the mode (rule 7).')
+
+        # Rule 8: from Switch on disabled only Shutdown moves the drive.
+        stuck = state == 'switch_on_disabled' and command in (
+            'Enable operation', 'Switch on / Disable operation')
+        sod_enable = sod_enable + 1 if stuck else 0
+        if rising('sod', sod_enable >= 2):
+            add('warning', 8, s, f'0x{cw:04X} held in Switch on disabled does nothing there: '
+                                 f'the path is 0x0006 -> 0x0007 -> 0x000F (rule 8).')
+        prev, prev_state = s, state
+
+    if not check_mode:
+        notes.append('Rule 7 (mode bits before 0x6061 confirms the mode) is checked only '
+                     'when the log has both 0x6060 and 0x6061.')
+    notes.append('The log shows what the master wrote and what the drive reported, sample '
+                 'by sample. A statusword can lag the controlword by a few samples, and a '
+                 'state that lasted less than one sample is missing.')
+    return {'samples': len(samples), 'columns': dict(columns), 'events': events,
+            'findings': findings, 'notes': notes,
+            'counts': {level: sum(f['level'] == level for f in findings) for level in LEVELS}}
+
+
 # --- Output -------------------------------------------------------------------------
 
 def _print_bits(result):
@@ -1150,6 +1373,31 @@ def render_plan(r):
     _print_notes(r['notes'])
 
 
+def render_trace(r):
+    print(f'trace: {r["samples"]} samples, {len(r["events"])} changes')
+    for e in r['events']:
+        if e['transitions'] is None:
+            via = ''
+        elif e['transitions']:
+            via = '  ' + ' + '.join(f'T{t}' for t in e['transitions'])
+        else:
+            via = '  (no single transition: a skipped sample, or not the profile)'
+        odd = ' (non-standard)' if e['nonstandard'] else ''
+        mode = ''
+        if e['mode'] is not None or e['display'] is not None:
+            mode = ''.join(f'  {name}={value}' for name, value in
+                           (('6060', e['mode']), ('6061', e['display'])) if value is not None)
+        print(f'  {e["time"]:>10}  cw {e["cw_hex"]} {e["command"]:<29}  sw {e["sw_hex"]} '
+              f'{e["state_name"]}{odd}{mode}{via}')
+    if r['findings']:
+        print('findings:')
+    for f in r['findings']:
+        print(f'  {f["level"]:<8} {f["time"]} (line {f["line"]}): {f["message"]}')
+    _print_notes(r['notes'])
+    c = r['counts']
+    print(f'result: {c["error"]} error(s), {c["warning"]} warning(s), {c["note"]} note(s)')
+
+
 def render_pdo(r):
     modes = ', '.join(m['key'].upper() if m['key'] else str(m['code']) for m in r['modes'])
     axes = ', '.join(str(a) for a in r['axes']) or 'none'
@@ -1218,10 +1466,27 @@ def run_pdo(mode_text, rx_texts, tx_texts):
     return check_pdo(_split_entries(rx_texts), _split_entries(tx_texts), modes), render_pdo
 
 
+def run_trace(path):
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError as e:
+        raise ValueError(f'cannot read {path}: {e.strerror}') from None
+    if data[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        text = data.decode('utf-16')
+    else:
+        try:
+            text = data.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            text = data.decode('latin-1')
+    samples, columns = read_trace(text.splitlines())
+    return trace(samples, columns), render_trace
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description='Decode CiA 402 drive words, plan state-machine transitions and check '
-                    'PDO mappings.')
+        description='Decode CiA 402 drive words, plan state-machine transitions, check PDO '
+                    'mappings and trace a recorded log.')
     sub = parser.add_subparsers(dest='verb', required=True)
 
     p = sub.add_parser('decode', help='decode a statusword, controlword, 0x6502, 0x6060 '
@@ -1255,6 +1520,13 @@ def main(argv=None):
                    help='TxPDO entries (drive to master), in the same form')
     p.add_argument('--json', action='store_true', help='machine-readable output')
 
+    p = sub.add_parser('trace', help='each state change in a recorded controlword / '
+                                     'statusword log, and the rules it breaks')
+    p.add_argument('file', help='CSV with a controlword (6040) and a statusword (6041) '
+                                'column, optionally 6060, 6061 and time; a TwinCAT Scope '
+                                'export works')
+    p.add_argument('--json', action='store_true', help='machine-readable output')
+
     args = parser.parse_args(argv)
     try:
         if args.verb == 'decode':
@@ -1262,6 +1534,8 @@ def main(argv=None):
         elif args.verb == 'plan':
             result, render = run_plan(args.start, args.target, args.mode,
                                       args.quick_stop_stays)
+        elif args.verb == 'trace':
+            result, render = run_trace(args.file)
         else:
             result, render = run_pdo(args.mode, args.rx, args.tx)
     except ValueError as e:
@@ -1270,8 +1544,8 @@ def main(argv=None):
         print(json.dumps(result, indent=2))
     else:
         render(result)
-    # A PDO check with an error fails, so it can gate a build.
-    return 1 if args.verb == 'pdo' and result['counts']['error'] else 0
+    # A PDO check or a trace with an error fails, so it can gate a build.
+    return 1 if args.verb in ('pdo', 'trace') and result['counts']['error'] else 0
 
 
 if __name__ == '__main__':
