@@ -8,6 +8,7 @@ also scores 100% has measured nothing.
 ```bash
 python3 evals/selftest.py                                   # the grader first (CI runs it)
 python3 evals/run_cells.py /tmp/ab-opus --model claude-opus-5-5 --reps 3   # the A/B round
+python3 evals/judge.py /tmp/ab-opus                         # the independent read (Sonnet 5.5)
 python3 evals/grade.py /tmp/ab-opus                         # right / partly / wrong per cell
 ```
 
@@ -33,9 +34,11 @@ runs side by side once corrupted the shared Claude Code config file.
 
 - `candidates.json`: the scouting set, 14 tasks asked without the skill to find where a model
   is wrong unaided. Graded by hand; verdicts in `results-scouting.md`.
-- `evals.json`: the A/B set. Six scouting tasks some model got wrong, and four aimed at what
-  scouting found: ordering errors that only show in code, vendor facts, and the `pdo` verb.
-  Each eval carries its prompt, the right answer in our own words, the traps, and a rubric
+- `evals.json`: the A/B set. Six scouting tasks some model got wrong, one code task aimed at
+  the ordering errors scouting found, and, since v0.2, three tasks the skill can fail as well:
+  an NC axis and a PLC block both writing one drive, a fault traced through a cycle log, and an
+  endless rotary axis that overruns the 32-bit position. v0.2 retired `pdo-two-axis` and
+  `canopen-bringup`, right in every answer of both arms in v0.1. Each eval carries its prompt, the right answer in our own words, the traps, and a rubric
   for right, partly and wrong. `guardrail-sto` is pass/fail, must pass in every skill cell,
   and never counts as evidence the skill helps.
 - `trigger-evals.json`: whether the `description` makes the skill fire. See below.
@@ -47,9 +50,16 @@ regular-expression check per point of the rubric. Negative checks are refusal-aw
 answers name a trap in order to reject it ("do not swap the supply"), so a claim only counts in
 a sentence that does not deny or rebut it. The checks detect that a point was made, not that it
 was made well, and some rules are control flow no pattern can see (does the reset release bit
-7, does a stop avoid T9). So every answer to the code task, every guardrail answer, and every
-cell where the checks look doubtful is read by hand; a `verdict.json` in the cell
-(`{"verdict": "P", "why": "..."}`) wins over the checks, and the report lists each override.
+7, does a stop avoid T9). So every answer is also read by `judge.py`.
+
+`judge.py` is the independent read. The checks, the evals and the expected answers have one
+author, and in v0.1 the hand read was that author too. The judge is a model that wrote none of
+it and is not under test (Sonnet 5.5 by default, `--model` to change). It gets the eval's
+prompt, expected answer, traps and rubric and the answer, not the arm or the cell path, runs
+with no tools and no settings, and writes `judge.json` into the cell. `grade.py` takes the
+judge's verdict over the checks and lists every cell where they disagree: those are the ones
+to read. A `verdict.json` in the cell (`{"verdict": "P", "why": "..."}`) wins over both, and
+the report lists it.
 
 `selftest.py` grades the grader before any agent runs. Each eval has a good answer, which must
 grade right, and trapped answers, each labelled with the verdict it must get; most repeat an
@@ -129,6 +139,22 @@ worry was the Modbus VFD and SINAMICS/PROFINET near-misses. Same day and setup:
 
 The inverter query fired 3 of 3 on both, the Modbus and PROFINET queries 0 of 3 on both. All
 three Opus misfires are the NC axis query, 3 of 3 this time: still the one borderline.
+
+**New near-misses** (2026-11-10, three runs per query, three workers). Eight near-misses the
+description was never tuned on were added: NC position-lag parameters, an SDO abort code, an
+ESI import error, CIP Motion homing, motor sizing, a Pilz SLS setup, CODESYS SoftMotion homing
+and a notch filter. Same description:
+
+| Description | Haiku 5.5 should · old near-miss · new near-miss | Opus 5.5 should · old near-miss · new near-miss |
+|---|---|---|
+| as in `SKILL.md` | 50/54 · 0/33 · 1/24 | 54/54 · 3/33 · 5/24 |
+
+The near-miss score did not hold on unseen queries on Opus: CODESYS SoftMotion `MC_Home` fired
+3 of 3 (Haiku 1 of 3), the notch filter 2 of 3. The description excludes TwinCAT NC and MC_
+blocks but not SoftMotion, and does not mention loop tuning. The old misfires are the NC axis
+query again. Haiku's four misses are four different should-trigger queries, 2 of 3 each.
+
+The A/B results are in `results-ab.md` (v0.1) and `results-ab-v0.2.md`.
 
 A first attempt that ran four checks at once timed
 out most session start-ups and scored them as misses; run one check at a time.

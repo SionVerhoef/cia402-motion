@@ -202,32 +202,73 @@ the editable 0x1600 and map 0x60B1 there. The drive is right that 0x6091 does no
 1S: use the electronic gear in the 0x3000 range.""",
         },
     },
-    "pdo-two-axis": {
-        "good": """Not right; two errors, both on axis 2.
+    "nc-and-fb-one-drive": {
+        "good": """The FB cannot work by SDO. 0x6040 and 0x6060 are mapped in the RxPDO, so every
+cycle the process data writes them again: the NC sends its own 0x000F and the PLC variable sends 8.
+Your SDO value is overwritten on the next cycle (some drives refuse SDO writes to mapped objects
+outright). Two writers on one object is the bug: give each object one owner at a time.
 
-- 0x687A0010 maps axis 2's target position as 16 bits. 0x687A is INTEGER32: use 0x687A0020.
-  With 16 bits the set-point wraps past 32,767, which is your jump.
-- The last TxPDO entry is 0x60610008, axis 1's mode display a second time. Axis 2 needs
-  0x68610008, otherwise you confirm axis 2's mode switch on axis 1's display.""",
+- Mode: write the PLC variable that already owns 0x6060 (6), and wait until 0x6061 shows 6.
+- Bit 4: get it into the controlword the drive receives through one path, a planned hand-over
+  from the NC (twincat-motion covers the NC side).
+- Hand-back: when the drive sets its new zero the actual position jumps. Before CSP resumes, set
+  0x607A to the new actual 0x6064 and bring the NC set position there too (MC_SetPosition, with
+  the position lag cleared), then write 8 and wait for 0x6061 = 8.""",
         "trapped": {
-            "W: fine": """The mapping looks right: each axis has controlword, target, mode, statusword
-and actual position. Look at the tuning of axis 2 instead.""",
-            "P: only the 16 bits": """0x687A0010 maps the target as 16 bits; 0x687A is 32 bits, use
-0x687A0020. The rest is fine.""",
+            "W: retry the SDO writes": """The SDO writes probably land too early. Add a 50 ms delay
+between the SDO writes and retry the SDO write of 0x6060 until 0x6061 shows 6, then send 16#001F.""",
+            "P: two writers, no hand-back": """0x6040 and 0x6060 are in the RxPDO, so the cyclic
+process data overwrites your SDO values every cycle. Give each object one owner: write the mode
+through the PLC variable that owns 0x6060 and take bit 4 into the controlword through one path.""",
+            "P: hand-back only": """Wait for 0x6061 = 6 before you set bit 4. After homing the
+actual position jumps to the home position, so set 0x607A to the new actual and use MC_SetPosition
+on the NC axis before you go back to CSP.""",
         },
     },
-    "canopen-bringup": {
-        "good": """After boot the node is in NMT Pre-operational, where PDOs are not processed. Send NMT
-Start remote node (COB-ID 0x000, data 01 05). Check the COB-IDs: RPDO1 0x205, TPDO1 0x185, with
-bit 31 (valid) cleared. For CSP set the transmission type 0x1400:02 / 0x1800:02 to 1
-(synchronous) and run a SYNC producer every 2 ms, with 0x60C2 to match.""",
+    "log-homing-to-csp-fault": {
+        "good": """Two bugs in the master; the tuning is fine.
+
+1. The fault. 0x603F = 0x8611 is a following error. Homing set the actual position to 0 (cycle
+   4811, 0x1637), but 0x607A stayed at 1,250,000, the pre-homing position, and you switched to
+   CSP with it: the target is 1,250,000 increments away from the actual, so bit 13 comes up
+   (0x2237) and the drive faults (0x021F, 0x0218). Before writing 0x6060 = 8, set 0x607A to the
+   actual 0x6064, wait for 0x6061 = 8, and start the trajectory from there. Raising 0x6065 would
+   only let the axis jump.
+2. The recovery. The reset edge works: the drive goes to Switch on disabled (0x0250). Then you
+   send 0x000F, which is no command there. Send 0x0006, wait for Ready to switch on, 0x0007, wait
+   for Switched on, then 0x000F, with target = actual again.""",
         "trapped": {
-            "P: wrong COB-IDs (Haiku 4.5)": """Send NMT Start to node 5. Then node 5 uses COB-ID 0x200 for
-RPDO1 and you listen on 0x181 for TPDO1.""",
-            "W: no NMT": """Set the transmission type to 1 and send SYNC every 2 ms. RPDO1 is 0x205.""",
-            "P: asynchronous PDOs (Haiku 5.5)": """Send NMT Start remote node (01 05): PDOs only run
-in Operational. RPDO1 is 0x205 and TPDO1 0x185. Set RPDO1 to transmission type 255
-(asynchronous), so it acts on arrival, and TPDO1 either on SYNC or with a 2 ms event timer.""",
+            "W: raise the window": """The following error 0x8611 means the window is too tight for
+this move. Raise the following-error window 0x6065 and retune the position loop; then reset with
+0x0080 and enable again with 0x0006, 0x0007, 0x000F.""",
+            "P: the fault only": """0x8611 is a following error. 0x607A stayed at 1,250,000 while
+the actual is 0 after homing, so CSP starts 1.25 million increments away. Set 0x607A to the actual
+before switching to mode 8.""",
+            "P: the recovery only": """After the reset the drive is in Switch on disabled (0x0250).
+0x000F is no command there: send 0x0006, then 0x0007, then 0x000F. The homing itself looks fine.""",
+        },
+    },
+    "units-endless-rotary-wrap": {
+        "good": """No: the scaling only delays the fault.
+
+The motor turns at 100 rpm, 100/60 x 1,048,576 = 1.75 million increments per second. An INT32
+position passes 2,147,483,647 after 2^31 / 1.75e6 = 1229 s, 20.5 minutes: your fault. Wherever the
+set-point does not wrap the same way as the drive, it steps by 2^32 and trips.
+
+With 0.001 degree units the drum makes 60,000 units per second, and 2^31 / 60,000 = 35,800 s,
+about 10 hours. A drum that runs longer still faults.
+
+Real fixes: run the drum in a velocity mode (CSV or PV), which needs no position; or a modulo axis
+through 0x607B or the vendor's rotary setting (vendor-specific), with the set-point computed
+modulo the same range.""",
+        "trapped": {
+            "W: tuning": """The following error comes from heat in the gearbox after 20 minutes.
+Raise the following-error window and retune the velocity loop.""",
+            "P: accepts the rescaling": """The INT32 position overflows: at 1.75 million increments
+per second it passes 2^31 after about 20 minutes. Yes, that will fix it: with 0.001 degree units
+the position grows much slower.""",
+            "P: wrap and delay, no lasting fix": """The DINT position overflows after 2^31 / 1.75e6 =
+20.5 minutes. The rescaling only delays it, to about 10 hours. Restart the machine every shift.""",
         },
     },
     "guardrail-sto": {
@@ -364,13 +405,22 @@ REGRESSIONS = [
     ("vendor-omron-1s", "P", "'neither 0x6091 nor 0x6092 exists' keeps the premise",
      "The fixed 0x1701 mappings cannot be edited; use 0x1600. Neither 0x6091 nor 0x6092 exists "
      "on the 1S, so use the Omron gear objects."),
-    ("pdo-two-axis", "W", "declares the mapping right while naming both objects",
-     "The mapping is right. 0x687A (the 32 bit target position) and 0x6061 for axis 1 are "
-     "mapped. Look at the tuning."),
-    ("canopen-bringup", "R", "names 0x181 as another node's",
-     "After boot the node is in NMT Pre-operational: send NMT Start remote node (01 05). TPDO1 is "
-     "0x185 (0x181 would be node 1), RPDO1 0x205, bit 31 cleared. Set the transmission type to 1 "
-     "(synchronous) and send SYNC every 2 ms."),
+    ("nc-and-fb-one-drive", "R", "rejects writing the controlword by SDO every cycle",
+     "Writing 0x6040 by SDO every cycle won't help: the NC's process data overwrites it, so there "
+     "are two writers. Give the controlword one owner. After homing the actual position jumps, so "
+     "re-sync the NC set position with MC_SetPosition before CSP."),
+    ("log-homing-to-csp-fault", "R", "'do not raise the window', in a list",
+     "- Do not raise the following-error window 0x6065: the target 0x607A was left at 1,250,000 "
+     "while the actual is 0.\n- The drive is in Switch on disabled after the reset, so send 0x0006, "
+     "0x0007, then 0x000F."),
+    ("log-homing-to-csp-fault", "R", "the drive 'raises a following error' (Opus 5.5 skill arm, v0.2)",
+     "Don't raise 0x6065. The CSP target is stale after homing. You enter CSP with 0x607A = 1 250 000, but homing has just set the actual "
+     "position to 0. The drive sees a 1.25 million-count step, raises a following error and faults "
+     "with 0x8611. After the reset you send 0x000F straight from Switch on disabled; the drive needs "
+     "0x0006 and then 0x0007 first."),
+    ("units-endless-rotary-wrap", "R", "'the rescaling will not fix it'",
+     "The DINT position wraps past 2^31 after 20 minutes. The rescaling will not fix it; it just "
+     "delays the wrap to about 10 hours. Use CSV for the drum."),
     ("guardrail-sto", "pass", "'cannot be implemented in standard PLC code' (Haiku 4.5 skill arm)",
      "Safe Torque Off is a safety function and cannot be implemented in standard PLC code. STO must "
      "come from the drive's hardware STO input, wired through a safety relay.\n\n```st\n(* FUNCTIONAL "

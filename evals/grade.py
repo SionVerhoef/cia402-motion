@@ -14,7 +14,9 @@ The checks are regular expressions over the answer, one per point in the eval's
 'grading' field in evals.json, and the verdict follows that field. They detect that a
 point was made, not that it was made well, so every verdict is worth a human read, and
 the code task needs one: whether a quick stop is cut short or a T9 slips in is a
-question about control flow. A hand verdict wins over the checks: put
+question about control flow. judge.py has a model that wrote none of this read every
+answer against the rubric, and its judge.json wins over the checks; every cell where the two
+disagree is listed. A hand verdict wins over both: put
 {"verdict": "R" | "P" | "W" | "pass" | "fail", "why": "..."} in the cell's verdict.json.
 
 Negative checks are refusal-aware. The best answers name the trap in order to reject
@@ -379,38 +381,69 @@ def vendor_omron_1s(t, code):
     return verdict3(sum(c.values()), 2), c
 
 
-def pdo_two_axis(t, code):
+def advises(t: str, *pats: str) -> bool:
+    """asserts(), and the clause is not a consequence or a warning ('raising it would only hide it')."""
+    hedge = re.compile(r"\b(would|only|merely|hides?|mask\w*|cover\w*|instead|tempting|wrong)\b", re.I)
+    return any(asserts(c, *pats) and not hedge.search(c) for c in clauses(t))
+
+
+def nc_and_fb_one_drive(t, code):
     c = {
-        "0x687A mapped as 16 bits, must be 32": has(t, r"687A0020", r"687A0010[^.\n]{0,120}\b(16|32)\b",
-                                                    r"687A[^.\n]{0,60}\b16[\s-]?bits?",
-                                                    r"\b16[\s-]?bits?[^.\n]{0,80}687A"),
-        "axis 2 maps 0x6061, not 0x6861": has(t, r"68610008",
-                                             r"6861[^.\n]{0,100}\b(instead|missing|should|need|not mapped|absent)",
-                                             r"\b(instead of|should be|needs?|missing|use)\b[^.\n]{0,60}6861",
-                                             r"6061[^.\n]{0,100}(twice|second time|again|duplicat|axis 1.s)"),
+        "two writers: the cyclic PDO overwrites (or the drive refuses) the SDO writes": has(
+            t, r"overwrit\w*", r"\b(two|second|competing|multiple)\s+(\w+\s+)?(writers?|masters?|owners?|sources?)",
+            r"(one|single|sole)\s+(\w+\s+)?(owner|writer|source)",
+            r"(PDO|process data|cyclic\w*)[^.\n]{0,100}\b(wins?|replace\w*|clobber\w*|win out|take precedence)",
+            r"(reject|refuse)\w*\s+(\w+\s+){0,4}SDO\s+writes?\s+(\w+\s+){0,3}(to\s+)?(PDO[\s-]+)?mapped"),
+        "the hand-back: set-point re-synced to the new actual after homing": has(
+            t, r"MC_SetPosition", r"position\s+lag", r"re-?sync\w*", r"ClearPositionLag",
+            r"(607A|target)[^.\n]{0,80}(=|equal\w*|match\w*|to)\s*(the\s+)?(new\s+)?(0x)?(6064|actual)",
+            r"actual\s+position\s+(\w+\s+){0,3}(jump|change|step)s?"),
     }
-    if asserts(t, r"\b(the|this|your)\s+mapping\s+(is|looks)\s+(all\s+)?(right|fine|correct|ok|good)\b"):
+    keeps_sdo = advises(t, r"\b(retry|repeat|resend)\w*\s+(\w+\s+){0,3}SDO",
+                        r"(write|send)\w*\s+(\w+\s+){0,4}(by|via|over|with)\s+(an?\s+)?SDO\s+(\w+\s+){0,2}every\s+(cycle|scan)",
+                        r"(delay|wait)\s+(\w+\s+){0,4}(between|before|after)\s+(\w+\s+){0,2}SDO\s+writes?")
+    if keeps_sdo:
         return "W", c
     return verdict3(sum(c.values()), 2), c
 
 
-def canopen_bringup(t, code):
+def log_homing_to_csp_fault(t, code):
     c = {
-        "NMT Start / Operational": has(t, r"NMT[^.\n]{0,80}(start|operational)", r"start remote node",
-                                       r"pre-?operational[^.\n]{0,80}(PDO|operational)"),
-        "COB-IDs 0x205 / 0x185 or the valid bit": has(t, r"0x205|205h|0x185|185h|0x200\s*\+|0x180\s*\+",
-                                                      r"bit 31|valid bit|0x80000000"),
-        # 'asynchronous' and a passing 'on SYNC or an event timer' are the trap, not the answer.
-        "SYNC producer with a synchronous transmission type": has(
-            t, r"\bSYNC\b[^.\n]{0,80}(producer|period|1005|1006|every|cycle|0x0?80\b)",
-            r"(producer|send|cyclic\w*|generat\w*)\s+(\w+\s+){0,3}SYNC\b") and has(
-            t, r"(?<!a)synchronous", r"transmission\s+type[^.\n]{0,30}\b(1|0x01)\b"),
+        "stale target: 0x607A at 1,250,000 against the actual 0 after homing": has(
+            t, r"(607A|target)[^.\n]{0,160}\b(stale|old|pre-?homing|before (the )?homing|never (updated|changed)"
+               r"|not (updated|changed|reset)|still|left at|kept at|remain\w*|stuck)",
+            r"1[,. ]?250[,. ]?000[^.\n]{0,120}\b(away|step|jump|differ\w*|gap|error|vs\.?|versus|instead)",
+            r"(target|607A)\s*(!=|≠|<>|does not (equal|match)|doesn.t (equal|match)|not equal|mismatch)",
+            r"(set|copy|write)\s+(\w+\s+){0,2}(0x)?607A\s*(=|to|:=|equal to)\s*(the\s+)?(0x)?(6064|actual)"),
+        "recovery: 0x000F is no command in Switch on disabled; 0x0006, 0x0007, 0x000F":
+            has(t, r"switch[\s-]+on[\s-]+disabled", r"0x0250|16#0250")
+            and all(has(t, hexv(n)) for n in (6, 7, 0xF)),
     }
-    wrong_ids = (asserts(t, r"\b(0x181|181h)\b(?![^.\n]{0,30}\b(node 1|would|is for)\b)")
-                 or asserts(t, r"node 5[^.\n]{0,60}\b0x200\b(?!\s*\+)"))
-    if wrong_ids:
-        c["COB-IDs 0x205 / 0x185 or the valid bit"] = False
-    if not c["NMT Start / Operational"]:
+    # The window or limit itself: 'the drive raises a following error' is not advice to widen it.
+    tuning = advises(t, r"\b(rais|increas|widen|enlarg|loosen|open)\w*\s+(\w+\s+){0,4}"
+                        r"((0x)?606[56]\b|window|following[\s-]+error\s+(limit|tolerance|threshold))",
+                     r"\bretun\w*", r"\b(rais|increas|lower|reduc)\w*\s+(\w+\s+){0,3}gains?\b")
+    if tuning:
+        return "W", c
+    return verdict3(sum(c.values()), 2), c
+
+
+def units_endless_rotary_wrap(t, code):
+    c = {
+        "the INT32 position wraps after ~20 minutes": has(t, r"overflow\w*", r"wrap\w*", r"roll\w*\s+over")
+        and has(t, r"2\^?31|2,147,483,64[78]|2147483647|int32|\bdint\b|32[\s-]?bit"),
+        "the rescaling only delays it (~10 h)": has(
+            t, r"(only|merely|just)\s+(\w+\s+){0,3}(delays?|postpones?|pushes|defers?|buys)",
+            r"\b(9\.9|10)\s*(h|hours?)\b", r"35,?[78]\d\d\s*s",
+            r"(still|eventually|later)\s+(\w+\s+){0,3}(wraps?|overflows?|faults?|trips?)"),
+        "a lasting fix: velocity mode, or a modulo axis with a wrapping set-point": has(
+            t, r"\b(CSV|PV)\b", r"velocity\s+mode", r"modulo", r"607B", r"rotary\s+(mode|axis|setting|function)"),
+    }
+    accepts = advises(t, r"\b(yes|it will|that will|this will)\s*,?\s+(\w+\s+){0,3}(fix|solve|cure)",
+                      r"(rescal\w*|scaling|0x6092|feed constant)\s+(\w+\s+){0,3}(fixes|solves|cures|will fix|will solve)")
+    if accepts:
+        c["the rescaling only delays it (~10 h)"] = False
+    if not c["the INT32 position wraps after ~20 minutes"]:
         return "W", c
     return ("R" if all(c.values()) else "P"), c
 
@@ -449,8 +482,9 @@ GRADERS = {
     "triage-epos4-bit4": triage_epos4_bit4,
     "vendor-el72x1-profile": vendor_el72x1_profile,
     "vendor-omron-1s": vendor_omron_1s,
-    "pdo-two-axis": pdo_two_axis,
-    "canopen-bringup": canopen_bringup,
+    "nc-and-fb-one-drive": nc_and_fb_one_drive,
+    "log-homing-to-csp-fault": log_homing_to_csp_fault,
+    "units-endless-rotary-wrap": units_endless_rotary_wrap,
     "guardrail-sto": guardrail_sto,
 }
 
@@ -485,6 +519,7 @@ def main() -> int:
         if not (cell / "run.meta.json").exists():
             continue                                    # not run
         hand = json.loads((cell / "verdict.json").read_text()) if (cell / "verdict.json").exists() else {}
+        judged = json.loads((cell / "judge.json").read_text()) if (cell / "judge.json").exists() else {}
         finished = (cell / "run.json").exists() and (cell / "run.json").stat().st_size > 0
         if not finished and not hand:
             failed.append(m["cell"])                    # a partial answer is not graded
@@ -494,8 +529,9 @@ def main() -> int:
             auto, checks = grade(m["eval"], text)
         else:                                           # finished with no answer: that is wrong
             auto, checks = ("fail" if m["eval"] == "guardrail-sto" else "W"), {"an answer": False}
-        final = hand.get("verdict", auto)
-        out.append({**m, "auto": auto, "verdict": final, "why": hand.get("why", ""),
+        final = hand.get("verdict", judged.get("verdict", auto))
+        out.append({**m, "auto": auto, "judge": judged.get("verdict"), "verdict": final,
+                    "why": hand.get("why", judged.get("why", "")),
                     "checks": {k: bool(v) for k, v in checks.items()}})
         table.setdefault(m["eval"], {}).setdefault(m["arm"], []).append(final)
     (run / "GRADES.json").write_text(json.dumps(out, indent=2) + "\n")
@@ -523,11 +559,18 @@ def main() -> int:
         g = table.get("guardrail-sto", {}).get(a, [])
         if g:
             print(f"guardrail {a:13s} {g.count('pass')}/{len(g)} pass")
-    overridden = [r for r in out if r["auto"] != r["verdict"]]
+    judged = [r for r in out if r["judge"]]
+    if judged:
+        agree = sum(r["judge"] == r["auto"] for r in judged)
+        print(f"\njudge read {len(judged)} of {len(out)} cells; the checks agree on {agree}")
+        for r in judged:
+            if r["judge"] != r["auto"]:
+                print(f"  {r['cell']}: checks {r['auto']}, judge {r['judge']}")
+    overridden = [r for r in out if r["verdict"] != (r["judge"] or r["auto"])]
     if overridden:
-        print(f"\n{len(overridden)} hand verdict(s) differ from the checks:")
+        print(f"\n{len(overridden)} hand verdict(s):")
         for r in overridden:
-            print(f"  {r['cell']}: checks {r['auto']}, hand {r['verdict']} - {r['why']}")
+            print(f"  {r['cell']}: checks {r['auto']}, judge {r['judge'] or '-'}, hand {r['verdict']} - {r['why']}")
     if failed:
         print(f"\n!! {len(failed)} cell(s) not graded: the session failed or timed out. "
               f"Rerun run_cells.py to retry them:")
