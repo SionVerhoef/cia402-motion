@@ -146,5 +146,21 @@
   {
     "query": "Servo axis on a long ball screw sings at around 300 Hz when I raise the velocity loop gain. How do I find the resonance and set a notch filter, and how much gain can I get back?",
     "should_trigger": false
+  },
+  {
+    "query": "CODESYS SoftMotion: an MC_CamIn on my SM3 slave axis jerks every time the master passes the end of the cam table. How do I make the cam periodic so it runs smoothly across the seam?",
+    "should_trigger": false
+  },
+  {
+    "query": "CODESYS SoftMotion: MC_MoveAbsolute on a modulo SM3 axis takes the long way round to 10 degrees. How do I make it pick the shortest direction?",
+    "should_trigger": false
+  },
+  {
+    "query": "Kollmorgen AKD in Workbench: the motor hums and buzzes at standstill after I ran the autotuner. Should I lower the position loop gain, or add a low-pass filter on the velocity loop?",
+    "should_trigger": false
+  },
+  {
+    "query": "Velocity loop step response overshoots about 30 % and rings for 50 ms on a belt axis. Do I lower Kp, raise the integral time, or add feed-forward, and what does the load inertia ratio change?",
+    "should_trigger": false
   }
 ]
