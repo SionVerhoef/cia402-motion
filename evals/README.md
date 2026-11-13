@@ -154,6 +154,21 @@ The near-miss score did not hold on unseen queries on Opus: CODESYS SoftMotion `
 blocks but not SoftMotion, and does not mention loop tuning. The old misfires are the NC axis
 query again. Haiku's four misses are four different should-trigger queries, 2 of 3 each.
 
+**SoftMotion and loop tuning excluded** (2026-11-13, three runs per query, three workers). "Not
+for" now names CODESYS SoftMotion axes and servo loop tuning. Four more near-misses it was never
+tuned on were added: a SoftMotion cam, a SoftMotion modulo move, an AKD hum after autotuning and
+a velocity-loop overshoot.
+
+| Description | Haiku 5.5 should · old · 11-10 · new near-miss | Opus 5.5 should · old · 11-10 · new near-miss |
+|---|---|---|
+| as in `SKILL.md` | 50/54 · 0/33 · 0/24 · 0/12 | 52/54 · 2/33 · 0/24 · 0/12 |
+
+The eight 2026-11-10 near-misses went from 5 of 24 to none on Opus, and the four new ones did not
+fire on either model. The Opus misfires are the NC axis query again (2 of 3). Its two misses are
+the EL7211-9014 query, 1 of 3; run again six times with this description and six with the one
+before, it fired 6 of 6 with both, so that was noise. Haiku missed Synapticon 3 of 3, as before,
+and the python-canopen query once.
+
 The A/B results are in `results-ab.md` (v0.1) and `results-ab-v0.2.md`.
 
 A first attempt that ran four checks at once timed
