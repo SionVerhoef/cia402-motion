@@ -104,6 +104,11 @@ compatibility switches for drives that set these bits in their own order (`vendo
 6. Before the next mode: target = actual (0x607A = 0x6064), then switch the mode with the 0x6061
    check (`modes.md`). Homing has just moved the reference, so a target computed before homing is
    wrong now.
+7. **Under a motion runtime** (TwinCAT NC, CODESYS SoftMotion) the master's own set position must
+   follow too: when the drive sets its new zero, the actual position jumps, but the NC axis still
+   holds its old set position. Re-sync it to the new actual before cyclic position resumes, or
+   the axis jumps or trips on following error. The master side (`MC_SetPosition`, clearing the
+   lag) belongs to **twincat-motion**.
 
 After an error: read 0x603F and the drive's diagnostics. Check the switch wiring and polarity,
 the method, the speeds and the limits, then start again with a new rising edge on bit 4.
