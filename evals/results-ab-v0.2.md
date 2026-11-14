@@ -117,4 +117,12 @@ cells. The whole round with both trigger checks was about $25.
 - The skill cells had no twincat-motion installed, so the NC side of `nc-and-fb-one-drive` could
   only come from the model.
 
+## Rerun after the hand-back fix (2026-11-13)
+
+`homing.md` now says that under NC or SoftMotion the axis' own set position must follow the
+drive's new zero, and the triage page points there. `nc-and-fb-one-drive` on Haiku 5.5, skill arm
+only, three repetitions, read by the judge: **PRR** (was RPP). All three answers name the NC
+re-sync; the judge gave rep1 a P because it says so in one bullet without the position jump.
+One P either way is within noise, so this shows the line is used, not that it helps.
+
 Run directories were scratch and are not kept.

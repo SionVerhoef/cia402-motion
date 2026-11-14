@@ -50,7 +50,8 @@ Find the state from the statusword, then:
 ## 3. The axis jumps
 
 - **On enable**: target = actual was not set before T4.
-- **After homing**: the reference moved, but the master kept the pre-homing target.
+- **After homing**: the reference moved, but the master kept the pre-homing target. Under NC or
+  SoftMotion the axis' own set position must be re-synced to the new actual too (`homing.md`).
 - **After a mode switch**: no 0x6061 check, or the new mode's set-point was not prepared.
 
 ## 4. Enabled, but it does not move

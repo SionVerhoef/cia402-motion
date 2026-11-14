@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if a tracked file contains a real-looking network identity.
+"""Fail if a tracked or untracked (not ignored) file contains a real-looking network identity.
 
 This repository is public (see CLAUDE.md). An AMS NetId, IP address or MAC address
 names one controller or device on one network, so examples, tests and templates
@@ -38,7 +38,9 @@ CHECKS = [("AMS NetId", NETID, NETID_OK), ("IP address", IPV4, IPV4_OK), ("MAC a
 
 
 def main():
-    files = subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True).stdout
+    # Untracked files too, so a new page is checked before it is staged.
+    files = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                           capture_output=True, check=True).stdout
     found = 0
     for path in filter(None, files.decode().split("\0")):
         try:
