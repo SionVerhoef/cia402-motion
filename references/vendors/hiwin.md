@@ -10,3 +10,10 @@ drive and firmware actually used.
   length-mismatch SDO abort.
 - **Eight homing methods: 1–6, 33 and 34.** 0 is no homing. There are no methods without the
   index pulse (17–30), no current-position method (35/37), and no negative methods.
+
+## Identity
+
+- **Vendor ID 0x0000AAAA; product codes 0x00000001 (D1NCOE), 0x00000002 (D1COE), 0x00000003
+  (D2COE)** [§3.2 p. 8]. Read 2026-11-14 from the Internet Archive copy of the guide's URL above,
+  which no longer resolves on hiwin.com. The value does not look like an ETG-assigned ID: check
+  it against the drive or its ESI before a master filters on it.

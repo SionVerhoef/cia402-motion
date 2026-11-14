@@ -150,3 +150,9 @@ Rev D (2011) lists only pv (3), ip (7) and homing (6) [D p. 36].
 
 Rev D (2011) listed fixed maps that Rev P no longer does: 0x1703 (torque command + controlword)
 and 0x1B02; and it had no 0x1722, 0x1724, 0x1725 or 0x1B22–0x1B26 [D p. 35].
+
+## Identity
+
+- **Vendor ID 0x6A** [p. 102]. **The product code is four ASCII characters**: L, M or H for the
+  voltage range, then three for the continuous current ("M006" for a medium-voltage 6 A drive)
+  [p. 103]. **0x1018:04 encodes board serial, week and year of production** [p. 103].

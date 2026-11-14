@@ -5,30 +5,48 @@ departs from it somewhere that matters in commissioning. These pages hold **devi
 what a drive does differently from `../state-machine.md`, `../modes.md` and the other
 profile pages, and what it adds or leaves out.
 
-| Page | Products |
-|---|---|
-| `beckhoff.md` | EL7201/7211/7221 servo terminals (MDP742 vs DS402); AX8000; EL7037/EL7047 steppers (not CiA 402); AX1000, AF1000 (no object documentation) |
-| `delta.md` | ASDA-A3-EP (400 V, EtherCAT); the 230 V ASDA-A3-E was not read |
-| `elmo.md` | Gold Line drives (2012 administration manual; Elmo's CiA 402 manual not read) |
-| `festo.md` | CMMT-AS (S1, S3), CMMT-ST, firmware V37.1 |
-| `hiwin.md` | D-series EtherCAT drives (2014 guide) |
-| `keb.md` | COMBIVERT F6 / S6 (Compact, Application, Pro control boards), software V3.0 |
-| `kollmorgen.md` | AKD with onboard EtherCAT, firmware 1.17 (manual edition P, 2017) |
-| `leadshine.md` | EL8-EC AC servo drives; EM3E-522E/556E/870E EtherCAT stepper drives |
-| `lenze.md` | i550 / i650 motec, i700, i750, i950 (with the "CiA 402 advanced" application) |
-| `linmot.md` | C1250-MI, C1251-MI with the CiA 402 interface |
-| `maxon.md` | EPOS4 |
-| `mitsubishi.md` | MR-J4-_TM_ with the ABCC-M40-ECT EtherCAT module (software A0–B4) |
-| `nanotec.md` | CL3-E, NP5 |
-| `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD; Digitax HD M753 (built-in) |
-| `omron.md` | 1S series (R88D-1SN…-ECT) |
-| `panasonic.md` | MINAS A6BN (A6B gantry control type, linear motors only), software Ver.3.20; not the rotary A6B |
-| `rexroth.md` | ctrlX DRIVE, firmware AXS-V-06RS (not IndraDrive / HCS01) |
-| `schneider.md` | Lexium 32M (LXM32M), from the user guide only (fieldbus manuals not read) |
-| `sew.md` | MOVI-C with the CiA402 device profile: MOVIDRIVE modular/system/technology, MOVITRAC advanced, decentralized units |
-| `stober.md` | SC6, SI6 with the "CiA 402" or "CiA 402 HiRes Motion" application, firmware V 6.4-D or later |
-| `synapticon.md` | SOMANET, firmware v5 |
-| `yaskawa.md` | Σ-V SGDV-E1 / SGDV-E5 with the SGDV-OCA01A EtherCAT module (2010 manual; not Σ-7) |
+| Page | Products | Vendor ID (0x1018:01) |
+|---|---|---|
+| `beckhoff.md` | EL7201/7211/7221 servo terminals (MDP742 vs DS402); AX8000; EL7037/EL7047 steppers (not CiA 402); AX1000, AF1000 (no object documentation) | 0x2 = 0x00000002 |
+| `delta.md` | ASDA-A3-EP (400 V, EtherCAT); the 230 V ASDA-A3-E was not read | not stated |
+| `elmo.md` | Gold Line drives (2012 administration manual; Elmo's CiA 402 manual not read) | not stated |
+| `festo.md` | CMMT-AS (S1, S3), CMMT-ST, firmware V37.1 | not stated |
+| `hiwin.md` | D-series EtherCAT drives (2014 guide) | 0xAAAA = 0x0000AAAA |
+| `keb.md` | COMBIVERT F6 / S6 (Compact, Application, Pro control boards), software V3.0 | printed "20" (0x14 = 0x00000014 if decimal) |
+| `kollmorgen.md` | AKD with onboard EtherCAT, firmware 1.17 (manual edition P, 2017) | 0x6A = 0x0000006A |
+| `leadshine.md` | EL8-EC AC servo drives; EM3E-522E/556E/870E EtherCAT stepper drives | EM3E: printed "4321", base not stated (0x10E1 or 0x4321); EL8 not stated |
+| `lenze.md` | i550 / i650 motec, i700, i750, i950 (with the "CiA 402 advanced" application) | 0x3B = 0x0000003B |
+| `linmot.md` | C1250-MI, C1251-MI with the CiA 402 interface | 0x4C4E5449 (ESI: "NTI AG") |
+| `maxon.md` | EPOS4 | 0xFB = 0x000000FB |
+| `mitsubishi.md` | MR-J4-_TM_ with the ABCC-M40-ECT EtherCAT module (software A0–B4) | 0xA1E = 0x00000A1E |
+| `nanotec.md` | CL3-E, NP5 | 0x26C = 0x0000026C |
+| `nidec.md` | Control Techniques SI-EtherCAT module on Unidrive M and Digitax HD; Digitax HD M753 (built-in) | 0xF9 = 0x000000F9 (Control Techniques) |
+| `omron.md` | 1S series (R88D-1SN…-ECT) | 0x83 = 0x00000083 |
+| `panasonic.md` | MINAS A6BN (A6B gantry control type, linear motors only), software Ver.3.20; not the rotary A6B | 0x66F = 0x0000066F |
+| `rexroth.md` | ctrlX DRIVE, firmware AXS-V-06RS (not IndraDrive / HCS01) | not stated |
+| `schneider.md` | Lexium 32M (LXM32M), from the user guide only (fieldbus manuals not read) | not stated |
+| `sew.md` | MOVI-C with the CiA402 device profile: MOVIDRIVE modular/system/technology, MOVITRAC advanced, decentralized units | not stated |
+| `stober.md` | SC6, SI6 with the "CiA 402" or "CiA 402 HiRes Motion" application, firmware V 6.4-D or later | not stated |
+| `synapticon.md` | SOMANET, firmware v5 | 0x22D2 = 0x000022D2 (printed 8914) |
+| `yaskawa.md` | Σ-V SGDV-E1 / SGDV-E5 with the SGDV-OCA01A EtherCAT module (2010 manual; not Σ-7) | 0x539 = 0x00000539 |
+
+### Identifying a drive from 0x1018
+
+When the user gives an identity object or an ESI instead of a name, match the vendor ID (0x1018:01,
+or `<Vendor><Id>` in the ESI) against the column above, then the product code (0x1018:02) in the
+vendor page's identity notes. Compare values, not spelling: the same ID is written 0x539,
+0x00000539, #x00000539 or as a decimal number. Each ID is taken from that vendor's own manual or
+ESI, cited on its page; "not stated" means the documents read gave no value, not that the vendor
+has none. Three things to keep in mind:
+
+- **An option module may report its own maker's ID.** The Nidec SI-EtherCAT module reports
+  Control Techniques' ID (`nidec.md`). On the Yaskawa SGDV-OCA01A and Mitsubishi MR-J4-TM,
+  the identity is for the drive, but other 0x1018 entries describe the module (`yaskawa.md`,
+  `mitsubishi.md`).
+- **A product code can change with the drive's settings.** On a Nidec it includes the drive mode
+  (`nidec.md`). On a KEB every F6/S6 has the same code (`keb.md`).
+- **An ID not in the column means no page was written.** It does not mean the drive is standard.
+  Work from the profile and the drive's own manual or ESI, and say so.
 
 ## How to use these pages
 

@@ -41,6 +41,11 @@ unless it was run on hardware.
    the document and the date it was read, from the `references/vendors/` pages. Never present
    it as the profile, and never carry a manufacturer-specific number (negative homing methods,
    negative modes, option codes outside the profile) from one drive to another.
+   **If the vendor is not named, identify the drive before answering**: look up the vendor ID
+   (0x1018:01, or `<Vendor><Id>` in its ESI) in the Vendor ID column of
+   `references/vendors/README.md`, then the product code (0x1018:02) on that vendor's page.
+   Compare values, not spelling: 0x00000539 is 0x539. An ID not in the table means no page was
+   written, not that the drive is standard.
 4. **What *this* drive supports is a device fact, not a guess.** Its modes (0x6502), objects,
    allowed values and mappable or default PDOs come from the drive: ask the **ethercat-esi**
    skill, or read its ESI/EDS file or manual. This skill explains the profile, and says when the
@@ -91,7 +96,7 @@ Load a reference when the task reaches it, not all of them up front.
 | Touch probe / position latch | `references/touch-probe.md` |
 | 0x603F, EMCY, warning bit, following error | `references/errors.md` |
 | CANopen: NMT, COB-IDs, SYNC, PDO setup, heartbeat | `references/canopen-transport.md` |
-| A specific vendor's drive | `references/vendors/README.md`, then the vendor's page |
+| A specific vendor's drive, or one known only by its 0x1018 identity | `references/vendors/README.md`, then the vendor's page |
 | STO, SS1, SLS, FSoE, E-stop, any SIL/PL claim | `references/safety-boundary.md` |
 | PLC code that drives the state machine itself, where no TwinCAT NC or CODESYS SoftMotion axis will: profile modes, drive-based homing, a PLC without a motion runtime. Start from the template; don't write it fresh | `templates/README.md` ("When to use it" first), then `templates/FB_Cia402Axis.st` or the TwinCAT files |
 

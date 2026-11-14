@@ -27,3 +27,15 @@ From sections 7-7, 9-2 and App. A-2-8, read together:
   0x3001:05/:06 mirror it. **0x6092 (feed constant) is absent.**
 - **The gear works only at cycle times of 250 µs or more.** At 125 µs it must be 1:1.
 - **With an Omron NJ/NX controller the gear stays 1:1**, and the controller does the scaling.
+
+## Identity
+
+From section A-2-4: **vendor ID 0x00000083**, and one product code per model:
+
+| Models | Product codes |
+|---|---|
+| R88D-1SN01L/02L/04L-ECT (100 V) | 0xAB, 0xAC, 0xAD |
+| R88D-1SN01H/02H/04H/08H/10H/15H/20H/30H-ECT (200 V) | 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5 |
+| R88D-1SN55H/75H/150H-ECT (200 V) | 0xE7, 0xE8, 0xE9 |
+| R88D-1SN06F/10F/15F/20F/30F-ECT (400 V) | 0xBE, 0xB6, 0xB7, 0xB8, 0xB9 |
+| R88D-1SN55F/75F/150F-ECT (400 V) | 0xEA, 0xEB, 0xEC |

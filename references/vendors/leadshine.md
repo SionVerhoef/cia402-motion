@@ -28,6 +28,11 @@ disagree for 0x6065, 0x6067, 0x6068, 0x6080, 0x6085 and 0x6092:01, among others 
 - **The EM3E identifies itself under an older name**: 0x1008 reads "DM3C-EC522/556/870", and
   the product code 0x1018:02 encodes the model [EM3E p. 19]. Match the ESI by product code, not
   by name.
+- **EM3E identity as printed: vendor ID "4321", product code "8X00"** with X = 1 for
+  EM3E-556E, 2 for EM3E-870E, 3 for EM3E-522E [EM3E pp. 19, 43]. The table does not say
+  whether these are hex or decimal (vendor ID 0x4321 or 0x10E1), and it types them UINT, not
+  UDINT. Read 0x1018 from the drive, or take the values from the ESI. The EL8 manual gives no
+  0x1018 values.
 
 ## State machine
 

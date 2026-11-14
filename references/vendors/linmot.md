@@ -50,3 +50,15 @@ sit at 0x2000 + UPID [§5.4 p. 58].
 - **0x60FF is scaled to 1 µm/s** by a numerator/denominator parameter pair [§5.2].
 - **PDOs are predefined modules.** Free mapping exists only through 0x1620/0x1A20, with 1–8
   entries addressed by UPID [§4.1.2].
+
+## Identity
+
+**Read 2026-11-14**: the ESI files `NTIL_CiA402_Servos_MI_V1_0r4.xml` and
+`NTIL_CiA402_Servos_FS_V1_0ra3.xml` in LinMot-Talk 6.14 (build 20260111),
+https://shop.linmot.com/data/import/Software/0187-0001_6V14_SW_LinMot-Talk_6.14_Build_20260111.zip,
+folder `Firmware/Interfaces/EtherCat_NX/XML/`. The manual above gives no 0x1018 values.
+
+- **Vendor ID 0x4C4E5449**, named "NTI AG" in the ESI (LinMot's company), not "LinMot".
+- **Product codes: C1250-MIDS-XC-0S 0x009675BE, C1250-MIDS-XC-1S 0x009675D2, C1251-MIDS-XC-2S
+  0x00967919** (the C1251 only in the FS file). The ESI writes "-MIDS-" where the manual writes
+  "-MI-".

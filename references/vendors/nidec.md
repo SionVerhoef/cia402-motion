@@ -32,6 +32,10 @@ does not say so itself: check the M753's own documentation where it matters.
 
 ## Identity changes with the drive mode
 
+**The vendor ID 0x1018:01 is 0x000000F9**, Control Techniques' ID, the same as on the older
+SM-EtherCAT and SM-CANopen modules [p. 33]. It belongs to the option module, so a Nidec drive
+shows up under the Control Techniques name.
+
 **The product code 0x1018:02 includes the host's drive mode**, so switching the drive between
 open loop, RFC-A and RFC-S changes it. A master that checks the product code then drops the
 slave. Setting Pr S.00.049 to "Mode Agnostic" holds that byte at 0 [p. 33]. 0x1000 bits 16/17

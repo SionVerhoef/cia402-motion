@@ -48,3 +48,8 @@ master that queues moves with bit 5 = 0, as on most drives, gets no motion.
 **0x6091 gear ratio is the ratio between the motor shaft and the shaft carrying the position
 encoder**, not a user scaling. 0x6092 feed constant drives a virtual gear [OD p. 299]. Do not
 copy factor-group values from another vendor's drive.
+
+## Identity
+
+- **Vendor ID 8914 (0x000022D2)**; default product code 770 (0x00000302), not tied to a named
+  product [OD p. 51]. The object dictionary prints both in decimal.
