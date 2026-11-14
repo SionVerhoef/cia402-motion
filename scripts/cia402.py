@@ -704,10 +704,13 @@ def _mode_steps(mode):
     ]
 
 
-def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
+def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False,
+         mode_change_at_standstill=False, homing_method_at_t3=False):
     """Steps that take a drive from state `start` to state `target`. mode is the result
     of resolve_mode(), or None; quick_stop_stays says 0x605A keeps the drive in Quick
-    stop active, which is what makes T16 possible."""
+    stop active, which is what makes T16 possible. The other two describe drives that
+    change mode only at zero speed (Nidec, Mitsubishi, Panasonic) and that take 0x6098
+    at T3 (Nidec)."""
     if target in UNCOMMANDABLE:
         raise ValueError(f'{STATES[target]["name"]} cannot be commanded: the drive enters '
                          f'it by itself')
@@ -752,22 +755,47 @@ def plan(start, target='operation_enabled', mode=None, quick_stop_stays=False):
                 'stopped. If it stays, pass --quick-stop-stays.'))
             state = 'switch_on_disabled'
 
-    path = _shortest_path(state, target, quick_stop_stays)
+    homing_at_t3 = (homing_method_at_t3 and mode and mode[0] == 'hm'
+                    and target == 'operation_enabled')
+    if homing_at_t3 and state == 'operation_enabled':
+        # The method is read at T3 only, so homing from Operation enabled goes back
+        # through Ready to switch on.
+        path = _shortest_path(state, 'ready_to_switch_on', quick_stop_stays)
+        steps += [_transition_step(t) for t in path]
+        state = 'ready_to_switch_on'
+    # T16 would skip T3, and with it the homing method.
+    path = _shortest_path(state, target, quick_stop_stays and not homing_at_t3)
     for t in path:
         step = _transition_step(t)
+        if t['id'] == 3 and homing_at_t3:
+            steps.append(_step('prepare', note='Write 0x6098 (and 0x6099, 0x609A) now: '
+                                               'this drive takes them at T3 only.'))
         if t['to'] == 'operation_enabled':
-            if mode:
+            if homing_at_t3:
+                steps += _mode_steps(mode)[1:]  # the method went in before T3
+            elif mode:
                 steps += _mode_steps(mode)
             else:
                 step['note'] = ' '.join(filter(None, (t['note'], GENERIC_SETPOINT)))
         steps.append(step)
-    if start == target == 'operation_enabled' and mode:
+    if start == target == 'operation_enabled' and mode and not homing_at_t3:
+        if mode_change_at_standstill:
+            steps.append(_step('prepare', note='Bring the axis to a standstill and wait '
+                                               'for it: this drive changes mode only at '
+                                               'zero speed, and otherwise 0x6061 keeps '
+                                               'the old mode.'))
         steps += _mode_steps(mode)
 
     if start == target and not steps:
         notes.append(f'Already in {STATES[target]["name"]}: nothing to send.')
     if mode and target != 'operation_enabled':
         notes.append('--mode only adds steps on the way into Operation enabled.')
+    if homing_method_at_t3 and not homing_at_t3:
+        notes.append('--homing-method-at-t3 only changes a plan into Operation enabled '
+                     'with --mode hm.')
+    if homing_at_t3 and start == 'operation_enabled':
+        notes.append('Going back through Ready to switch on takes torque off the motor: a '
+                     'hanging axis depends on its brake.')
     if start == 'quick_stop_active' and target == 'operation_enabled' and not quick_stop_stays:
         notes.append('This goes through Switch on disabled. Direct return with 0x000F (T16) '
                      'works only when 0x605A keeps the drive in Quick stop active; pass '
@@ -1449,10 +1477,12 @@ def run_decode(what, text, mode_text):
     return result, render
 
 
-def run_plan(start_text, target_text, mode_text, quick_stop_stays):
+def run_plan(start_text, target_text, mode_text, quick_stop_stays,
+             mode_change_at_standstill=False, homing_method_at_t3=False):
     start, notices = resolve_state(start_text)
     target, _ = resolve_state(target_text, allow_statusword=False)
-    result = plan(start, target, resolve_mode(mode_text), quick_stop_stays)
+    result = plan(start, target, resolve_mode(mode_text), quick_stop_stays,
+                  mode_change_at_standstill, homing_method_at_t3)
     result['notes'] = notices + result['notes']
     return result, render_plan
 
@@ -1506,6 +1536,11 @@ def main(argv=None):
     p.add_argument('--mode', help='mode to switch to on the way into Operation enabled')
     p.add_argument('--quick-stop-stays', action='store_true',
                    help='0x605A keeps the drive in Quick stop active, so T16 is allowed')
+    p.add_argument('--mode-change-at-standstill', action='store_true',
+                   help='the drive changes mode only at zero speed (e.g. Nidec, '
+                        'Mitsubishi, Panasonic)')
+    p.add_argument('--homing-method-at-t3', action='store_true',
+                   help='the drive takes 0x6098 at T3 only (e.g. Nidec)')
     p.add_argument('--json', action='store_true', help='machine-readable output')
 
     p = sub.add_parser('pdo', help='check a PDO mapping against the modes it must run')
@@ -1533,7 +1568,9 @@ def main(argv=None):
             result, render = run_decode(args.what, args.value, args.mode)
         elif args.verb == 'plan':
             result, render = run_plan(args.start, args.target, args.mode,
-                                      args.quick_stop_stays)
+                                      args.quick_stop_stays,
+                                      args.mode_change_at_standstill,
+                                      args.homing_method_at_t3)
         elif args.verb == 'trace':
             result, render = run_trace(args.file)
         else:

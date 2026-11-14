@@ -408,6 +408,50 @@ class Planner(unittest.TestCase):
         self.assertIn('0x607A', r['steps'][0]['note'])
         self.assertIn('0x6060 = 8', r['steps'][1]['note'])
 
+    def test_behaviour_flags_still_reach_the_target(self):
+        for start in cia402.STATES:
+            for stays in (False, True):
+                for mode in ('hm', 'csp'):
+                    with self.subTest(start=start, stays=stays, mode=mode):
+                        r = cia402.plan(start, 'operation_enabled', cia402.resolve_mode(mode),
+                                        stays, True, True)
+                        self.assertEqual(replay(self, r, 0x0000, stays),
+                                         'operation_enabled')
+
+    def test_homing_method_at_t3_from_operation_enabled(self):
+        r = cia402.plan('operation_enabled', mode=cia402.resolve_mode('hm'),
+                        homing_method_at_t3=True)
+        self.assertEqual([(s['kind'], s['transition']) for s in r['steps']],
+                         [('write', 8), ('prepare', None), ('write', 3),
+                          ('prepare', None), ('write', 4)])
+        self.assertIn('0x6098', r['steps'][1]['note'])
+        self.assertIn('0x6060 = 6', r['steps'][3]['note'])
+        self.assertIn('brake', ' '.join(r['notes']))
+
+    def test_homing_method_at_t3_avoids_t16(self):
+        r = cia402.plan('quick_stop_active', mode=cia402.resolve_mode('hm'),
+                        quick_stop_stays=True, homing_method_at_t3=True)
+        transitions = [s['transition'] for s in r['steps']]
+        self.assertNotIn(16, transitions)
+        self.assertIn(3, transitions)
+
+    def test_homing_method_at_t3_only_with_homing(self):
+        csp = cia402.resolve_mode('csp')
+        plain = cia402.plan('operation_enabled', mode=csp)
+        r = cia402.plan('operation_enabled', mode=csp, homing_method_at_t3=True)
+        self.assertEqual(r['steps'], plain['steps'])
+        self.assertTrue(any('--homing-method-at-t3' in n for n in r['notes']))
+
+    def test_mode_change_at_standstill(self):
+        pp = cia402.resolve_mode('pp')
+        r = cia402.plan('operation_enabled', mode=pp, mode_change_at_standstill=True)
+        self.assertEqual([s['kind'] for s in r['steps']], ['prepare'] * 3)
+        self.assertIn('standstill', r['steps'][0]['note'])
+        # Enabling from below: the axis is not moving, so nothing changes.
+        self.assertEqual(
+            cia402.plan('switch_on_disabled', mode=pp, mode_change_at_standstill=True),
+            cia402.plan('switch_on_disabled', mode=pp))
+
     def test_every_mode_has_a_set_point_step(self):
         for code in cia402.MODES:
             with self.subTest(mode=code):
@@ -966,6 +1010,7 @@ class CommandLine(unittest.TestCase):
         ['plan', 'fault', '--mode', 'csp'],
         ['plan', '0x0068'],
         ['plan', 'qsa', 'oe', '--quick-stop-stays'],
+        ['plan', 'oe', '--mode', 'hm', '--homing-method-at-t3', '--mode-change-at-standstill'],
         ['plan', 'oe', 'sod'],
         ['pdo', '--mode', 'hm,csp', '--rx', '6040,6060,607A', '--tx', '6041', '6061', '6064'],
         ['pdo', '--mode', '-3', '--rx', '6040', '--tx', '6041'],

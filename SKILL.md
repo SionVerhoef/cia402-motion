@@ -60,7 +60,9 @@ python3 scripts/cia402.py trace scope.csv            # a recorded controlword/st
 - **`plan`** gives the controlword sequence from any state, or from a statusword value, to any
   commandable state. It includes transition numbers, the statusword to wait for, and the
   set-point and mode steps for `--mode`. Use it for any sequence advice, and compare it with
-  code you write. `--quick-stop-stays` when 0x605A keeps the drive in Quick stop active.
+  code you write. Flags describe the drive, from its vendor page: `--quick-stop-stays` when
+  0x605A keeps it in Quick stop active, `--mode-change-at-standstill` when it changes mode
+  only at zero speed, `--homing-method-at-t3` when it takes 0x6098 at T3 only.
 - **`pdo`** checks a mapping against the modes an axis runs in. Exit 1 on an error:
   `references/pdo-mapping.md`.
 - **`trace`** reads a CSV log of 0x6040 and 0x6041 (optionally 0x6060, 0x6061, time), such
