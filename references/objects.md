@@ -86,7 +86,7 @@ Torque and current are in thousandths of the rated value (0x6076, 0x6075).
 | 0x6083 | Profile acceleration | UINT32 | PP, PV |
 | 0x6084 | Profile deceleration | UINT32 | also the slow-down ramp of the option codes |
 | 0x6085 | Quick stop deceleration | UINT32 | the quick-stop ramp |
-| 0x6086 | Motion profile type | INT16 | 0 linear (trapezoid); others vendor-dependent |
+| 0x6086 | Motion profile type | INT16 | 0 linear (trapezoid), 1 sin², 2 jerk-free, 3 jerk-limited; negative values manufacturer-specific. Support varies (`vendors/delta.md`, `vendors/mitsubishi.md`, `vendors/nidec.md`) |
 
 ## Homing, touch probe, interpolation, I/O
 

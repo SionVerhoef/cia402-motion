@@ -61,7 +61,7 @@ ERR = {'not_ready': 0x8101, 'shutdown': 0x8102, 'switch_on': 0x8103, 'enable': 0
        'mode': 0x8105, 'stop': 0x8106, 'homing_time': 0x8107, 'drive_fault': 0x8110,
        'reset_failed': 0x8111, 'quick_stop': 0x8112, 'left_state': 0x8113,
        'homing': 0x8114, 'statusword': 0x8115, 'no_mode': 0x8120, 'no_quick_stop': 0x8108,
-       'reset_time': 0x8109}
+       'reset_time': 0x8109, 'inputs': 0x8116}
 
 # Short timeouts keep the scenarios to a few hundred scans.
 FAST = {'tStateTimeout': Time(200), 'tStopTimeout': Time(500), 'tHomingTimeout': Time(1000),
@@ -82,12 +82,14 @@ class SimDrive:
     def __init__(self, state=SOD, position=1000, modes=(1, 3, 4, 6, 8, 9, 10),
                  quick_stop_stays=False, settle=1, mode_delay=2, qs_ramp=10,
                  homing_scans=8, home_position=0, homing_phase=0x0400, homing_fails=False,
+                 homing_rejects=False,
                  boot_scans=5, fra_scans=3, jitter=0, refuse=(), ignores_bit_2=False,
                  sample=1):
         self.state, self.position, self.modes = state, position, modes
         self.quick_stop_stays, self.settle, self.mode_delay = quick_stop_stays, settle, mode_delay
         self.qs_ramp, self.homing_scans, self.home_position = qs_ramp, homing_scans, home_position
         self.homing_phase, self.homing_fails = homing_phase, homing_fails
+        self.homing_rejects = homing_rejects  # error on bit 4, never in progress
         self.boot_scans, self.fra_scans, self.jitter = boot_scans, fra_scans, jitter
         self.refuse = refuse  # states this drive will not move to when commanded
         self.ignores_bit_2 = ignores_bit_2  # reads controlword bit 2 as 1: no quick stop
@@ -279,6 +281,9 @@ class SimDrive:
             self.homing_left = None
             return
         if cw & 0x10 and not self.prev_accepted & 0x10:
+            if self.homing_rejects:
+                self.homing_phase = 0x2400
+                return
             self.homing_phase, self.homing_left = 0x0000, self.homing_scans
         if self.homing_left is None:
             return
@@ -317,6 +322,7 @@ class Rig:
         for name, value in dict(FAST, **config).items():
             self.config[name] = value
         self.enable, self.mode, self.reset, self.quick_stop = False, 0, False, False
+        self.inputs_valid = True  # FALSE: the FB's inputs read 0, as after a bus stop
         self.stop_held = False  # a quick stop was asked for and has not been released
         self.caller = None  # writes set-points after the call while bValid
         self.always = None  # writes before the call, valid or not
@@ -337,10 +343,14 @@ class Rig:
         self.io['nModesDisplay'] = display
         if self.copy_position:
             self.io['nPositionActual'] = position
+        if not self.inputs_valid:
+            for name in ('nStatusword', 'nModesDisplay', 'nPositionActual'):
+                self.io[name] = 0
         if self.always:
             self.always(self)
         self.out = self.fb.scan(self.now, bEnable=self.enable, nMode=self.mode,
                                 bReset=self.reset, bQuickStop=self.quick_stop,
+                                bInputsValid=self.inputs_valid,
                                 stConfig=self.config, stDrive=self.io)
         if self.out['bValid'] and self.caller:
             self.caller(self)
@@ -1256,6 +1266,18 @@ class Homing(TemplateCase):
         rig.valid()
         self.assertEqual(rig.drive.homing_phase, 0x1400)
 
+    def test_method_rejected_at_once_after_an_earlier_error(self):
+        # Bit 13 of the earlier run never clears: the drive refuses the start itself.
+        for lag in (0, 2):
+            with self.subTest(lag=lag):
+                rig = self.make(homing_phase=0x2400, homing_rejects=True, lag=lag)
+                rig.enable, rig.mode = True, 6
+                rig.until(lambda r: r.words[-1] == 0x001F, what='bit 4')
+                n = rig.error(ERR['homing'])
+                self.assertGreaterEqual(n * CYCLE, 200)  # tStateTimeout, not before
+                self.assertLess(n * CYCLE, 1000)         # not tHomingTimeout
+                rig.at_rest()
+
     def test_homing_error_takes_the_drive_down(self):
         rig = self.make(homing_fails=True)
         rig.enable, rig.mode = True, 6
@@ -1933,6 +1955,53 @@ class ResetTimeLimit(TemplateCase):
         self.assertEqual(len(rig.edges_of_bit_7(mark)), 3)
 
 
+class InputsInvalid(TemplateCase):
+    """bInputsValid FALSE: the inputs read 0 and the FB must not believe them."""
+
+    def test_one_invalid_scan_while_enabled_is_no_error(self):
+        for lag in (0, 2):
+            with self.subTest(lag=lag):
+                rig = self.running(lag=lag)
+                rig.caller = ramp(3)
+                rig.run(5)
+                word = rig.words[-1]
+                rig.inputs_valid = False
+                rig.scan()
+                self.assertFalse(rig.out['bError'])
+                self.assertEqual(rig.words[-1], word)  # the last word, held
+                rig.inputs_valid = True
+                rig.run(20)
+                self.assertTrue(rig.out['bValid'])
+                self.assertFalse(rig.out['bError'])
+                self.assertEqual(rig.drive.state, OE)
+
+    def test_invalid_longer_than_the_limit_is_an_error(self):
+        rig = self.running()
+        word = rig.words[-1]
+        rig.inputs_valid = False
+        n = rig.error(ERR['inputs'])
+        self.assertGreaterEqual(n * CYCLE, 100)  # T#100MS, the default
+        rig.run(10)
+        self.assertEqual(set(rig.words[-n - 10:]), {word})  # nothing decoded from 0
+        self.assertEqual(rig.drive.state, OE)
+        rig.inputs_valid = True
+        rig.at_rest()
+        rig.pulse_reset()
+        rig.valid()
+
+    def test_a_quick_stop_asked_meanwhile_goes_out(self):
+        rig = self.running()
+        rig.inputs_valid = False
+        rig.quick_stop = True
+        rig.scan()
+        rig.quick_stop = False
+        self.assertEqual(rig.words[-1], 0x0002)
+        self.assertFalse(rig.out['bValid'])
+        rig.inputs_valid = True
+        rig.at_rest()
+        self.assertFalse(rig.out['bError'])
+
+
 class Errors(TemplateCase):
 
     def test_transitions_the_drive_refuses_time_out(self):
@@ -2048,16 +2117,17 @@ BROKEN_RULES = {
         'IF (eDriveState <> E_Cia402State.Fault)\n',
         BadStatusword, 'test_on_the_edge_it_spends_no_attempt'),
     'CSP target not held at actual before enable, with jitter': (
-        '    stDrive.nTargetPosition := stDrive.nPositionActual;\n    stDrive.nTargetVelocity',
-        '    ;\n    stDrive.nTargetVelocity',
+        '        stDrive.nTargetPosition := stDrive.nPositionActual;\n'
+        '        stDrive.nTargetVelocity',
+        '        ;\n        stDrive.nTargetVelocity',
         Jitter, 'test_a_stale_target_is_still_a_jump'),
     'quick stop cut with 0x0000': (
         'stDrive.nControlword := 16#0002;   // let it finish',
         'stDrive.nControlword := 16#0000;   // let it finish',
         QuickStop, 'test_external_quick_stop_is_left_to_finish'),
     'quick stop left on a timer': (
-        '                IF fbStandstill.Q THEN',
-        '                IF fbStandstill.Q OR fbStepTimer.Q THEN',
+        '                    IF fbStandstill.Q THEN',
+        '                    IF fbStandstill.Q OR fbStepTimer.Q THEN',
         QuickStop, 'test_jitter_without_a_band_holds_the_quick_stop'),
     'quick stop left without bQuickStopStays': (
         'fbStandstill(IN := stConfig.bQuickStopStays\n',
@@ -2073,12 +2143,12 @@ BROKEN_RULES = {
         CommandedQuickStop, 'test_a_ramp_longer_than_the_stop_timeout_is_no_error'),
     'the ramp of a commanded quick stop timed out': (
         'fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest\n'
-        '                       AND (eDriveState <> E_Cia402State.QuickStopActive)\n',
+        '                           AND (eDriveState <> E_Cia402State.QuickStopActive)\n',
         'fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest\n',
         CommandedQuickStop, 'test_a_ramp_longer_than_the_stop_timeout_is_no_error'),
     "the last step's timer taken for the quick stop's": (
-        '        ELSIF fbQuickStopTimer.Q THEN',
-        '        ELSIF fbStepTimer.Q THEN',
+        '            ELSIF fbQuickStopTimer.Q THEN',
+        '            ELSIF fbStepTimer.Q THEN',
         CommandedQuickStop, 'test_a_long_run_before_it_is_no_timeout'),
     'commanded quick stop sent as T5': (
         'stDrive.nControlword := 16#0002;   // T11, held',
@@ -2101,32 +2171,33 @@ BROKEN_RULES = {
         'ELSIF bAtRest THEN',
         CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
     'busy while held down': (
-        '          AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop)) OR NOT bAtRest);',
-        '          AND (bEnable OR NOT bAtRest);',
+        '              AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop))\n'
+        '                   OR NOT bAtRest);',
+        '              AND (bEnable OR NOT bAtRest);',
         CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
     'quick stop not sent to an enabled drive in Error': (
-        '                IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
-        '                IF FALSE\n',
+        '                    IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
+        '                    IF FALSE\n',
         CommandedQuickStop, 'test_in_an_error_an_enabled_drive_still_gets_t11'),
     'no way back to T5 from a refused T11': (
-        '                IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
-        '                IF bQuickStopHeld\n',
+        '                    IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
+        '                    IF bQuickStopHeld\n',
         CommandedQuickStop, 'test_a_drive_that_refuses_t11_is_taken_down_with_t5'),
     'T5 for a quick stop asked with an undecodable statusword': (
-        'may be a bad one.\n                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
-        'may be a bad one.\n                IF FALSE THEN',
+        'may be a bad one.\n                    IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN',
+        'may be a bad one.\n                    IF FALSE THEN',
         CommandedQuickStop, 'test_an_undecodable_statusword_gets_0x0002_as_well'),
     'quick stop forgotten in an error': (
         'ELSIF bQuickStopHeld AND NOT bResetting THEN',
         'ELSIF bQuickStop AND NOT bResetting THEN',
         CommandedQuickStop, 'test_a_fault_while_held_down_does_not_release_it'),
     'quick stop lost during a fault reset': (
-        'IF bQuickStop THEN\n    bQuickStopHeld := TRUE;',
-        'IF bQuickStop AND NOT bResetting THEN\n    bQuickStopHeld := TRUE;',
+        'IF bQuickStop THEN\n        bQuickStopHeld := TRUE;\n    ELSIF',
+        'IF bQuickStop AND NOT bResetting THEN\n        bQuickStopHeld := TRUE;\n    ELSIF',
         CommandedQuickStop, 'test_raised_at_every_scan_of_a_fault_reset'),
     'T9 from Operation enabled': (
-        'stDrive.nControlword := 16#0007;   // T5, stops as 0x605C',
-        'stDrive.nControlword := 16#0000;   // T5, stops as 0x605C',
+        'stDrive.nControlword := 16#0007;   // T5, per 0x605C',
+        'stDrive.nControlword := 16#0000;   // T5, per 0x605C',
         Disabling, 'test_way_down_from_operation_enabled_as_the_planner_says'),
     'Enable operation straight from Switch on disabled': (
         'stDrive.nControlword := 16#0006;   // T2',
@@ -2134,82 +2205,89 @@ BROKEN_RULES = {
         Enabling, 'test_from_each_state_as_the_planner_says'),
     'bit 7 never released': (
         'IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)\n'
-        '           OR fbStepTimer.Q\n',
+        '               OR fbStepTimer.Q\n',
         'IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)\n',
         FaultReset, 'test_failed_resets_release_bit_7_every_time'),
     'bit 7 with the enable bits': (
-        '            stDrive.nControlword := 16#0080;\n',
-        '            stDrive.nControlword := 16#008F;\n',
+        '                stDrive.nControlword := 16#0080;\n',
+        '                stDrive.nControlword := 16#008F;\n',
         FaultReset, 'test_fault_while_running_then_reset'),
     'reset outside Fault': (
-        '            IF eDriveState = E_Cia402State.Fault THEN\n                nErrorID    := 0;',
-        '            IF TRUE THEN\n                nErrorID    := 0;',
+        '                IF eDriveState = E_Cia402State.Fault THEN\n'
+        '                    nErrorID    := 0;',
+        '                IF TRUE THEN\n                    nErrorID    := 0;',
         FaultReset, 'test_reset_is_never_sent_to_a_drive_not_in_fault'),
     'reset on a level, not an edge': (
-        'ELSIF fbResetTrig.Q THEN\n    bResetRequest := TRUE;',
-        'ELSIF bReset THEN\n    bResetRequest := TRUE;',
+        'ELSIF fbResetTrig.Q THEN\n        bResetRequest := TRUE;',
+        'ELSIF bReset THEN\n        bResetRequest := TRUE;',
         FaultReset, 'test_level_reset_resets_once'),
     'no pause between reset attempts': (
         'tStepLimit := stConfig.tResetPause;',
         'tStepLimit := cResetSettle;',
         FaultReset, 'test_attempts_are_paused'),
     'reset attempts not counted afresh': (
-        '                nResetCount := 0;\n',
+        '                    nResetCount := 0;\n',
         '',
         FaultReset, 'test_reset_attempts_restart_on_each_reset'),
     'reset asked in Fault reaction active dropped': (
-        '        IF bResetRequest AND NOT bDriveMoved THEN',
-        '        IF bResetRequest AND NOT bDriveMoved AND fbResetTrig.Q THEN',
+        '            IF bResetRequest AND NOT bDriveMoved THEN',
+        '            IF bResetRequest AND NOT bDriveMoved AND fbResetTrig.Q THEN',
         FaultReset, 'test_reset_asked_in_fault_reaction_active_is_kept'),
     'stale homing result taken': (
-        '        ELSIF bHomingRunSeen\n              AND ((stDrive.nStatusword AND 16#3400)',
-        '        ELSIF TRUE\n              AND ((stDrive.nStatusword AND 16#3400)',
+        '            ELSIF bHomingRunSeen\n'
+        '                  AND ((stDrive.nStatusword AND 16#3400)',
+        '            ELSIF TRUE\n                  AND ((stDrive.nStatusword AND 16#3400)',
         Homing, 'test_result_of_an_earlier_run_is_not_taken_for_this_one'),
     'stale homing error taken': (
-        '        ELSIF bHomingRunSeen\n              AND ((stDrive.nStatusword AND 16#2000)',
-        '        ELSIF TRUE\n              AND ((stDrive.nStatusword AND 16#2000)',
+        '            ELSIF (bHomingRunSeen OR fbHomingStart.Q)\n'
+        '                  AND ((stDrive.nStatusword AND 16#2000)',
+        '            ELSIF TRUE\n                  AND ((stDrive.nStatusword AND 16#2000)',
         Homing, 'test_retry_after_a_homing_error'),
     '0x6060 in the same scan as the set-point': (
-        '        IF bSetModeLastScan THEN',
-        '        IF TRUE THEN',
+        '            IF bSetModeLastScan THEN',
+        '            IF TRUE THEN',
         ModeSwitch, 'test_new_modes_set_point_is_made_safe_first'),
     "new mode's velocity not made safe": (
-        '            3, 9:\n                stDrive.nTargetVelocity := 0;',
-        '            3, 9:\n                ;',
+        '                3, 9:\n                    stDrive.nTargetVelocity := 0;',
+        '                3, 9:\n                    ;',
         ModeSwitch, 'test_new_modes_set_point_is_made_safe_first'),
     'mode not confirmed on 0x6061': (
-        '              AND (stDrive.nModesDisplay = nMode)\n        THEN\n            IF eDriveState',
-        '        THEN\n            IF eDriveState',
+        '                  AND (stDrive.nModesDisplay = nMode)\n            THEN\n'
+        '                IF eDriveState',
+        '            THEN\n                IF eDriveState',
         ModeSwitch, 'test_switch_while_enabled_is_confirmed_on_6061'),
     'mode change during T4 not seen': (
-        '            ELSIF (nMode <> stDrive.nModesOfOperation)\n                  OR (nMode <> '
-        'stDrive.nModesDisplay)\n            THEN\n                eStep := E_Cia402Step.SetMode;\n'
-        '            ELSIF nMode = 6 THEN',
-        '            ELSIF nMode = 6 THEN',
+        '                ELSIF (nMode <> stDrive.nModesOfOperation)\n'
+        '                      OR (nMode <> '
+        'stDrive.nModesDisplay)\n                THEN\n'
+        '                    eStep := E_Cia402Step.SetMode;\n'
+        '                ELSIF nMode = 6 THEN',
+        '                ELSIF nMode = 6 THEN',
         ModeSwitch, 'test_mode_change_during_t4_goes_back_to_set_mode'),
     'drop during a switch enabled again': (
-        '        ELSIF bDriveMoved\n              OR ((eDriveState',
-        '        ELSIF FALSE\n              OR ((eDriveState',
+        '            ELSIF bDriveMoved\n                  OR ((eDriveState',
+        '            ELSIF FALSE\n                  OR ((eDriveState',
         ModeSwitch, 'test_drop_to_switched_on_during_a_switch_is_an_error'),
     'target not held at actual before T4': (
-        '    stDrive.nTargetPosition := stDrive.nPositionActual;\n    stDrive.nTargetVelocity := 0;',
-        '    stDrive.nTargetVelocity := 0;',
+        '        stDrive.nTargetPosition := stDrive.nPositionActual;\n'
+        '        stDrive.nTargetVelocity := 0;',
+        '        stDrive.nTargetVelocity := 0;',
         Enabling, 'test_csp_target_follows_actual_until_valid'),
     'velocity not held at 0 before T4': (
-        '    stDrive.nTargetVelocity := 0;\n    stDrive.nTargetTorque   := 0;',
-        '    stDrive.nTargetTorque   := 0;',
+        '        stDrive.nTargetVelocity := 0;\n        stDrive.nTargetTorque   := 0;',
+        '        stDrive.nTargetTorque   := 0;',
         Enabling, 'test_csv_and_cst_enable_with_zero_set_points'),
     'torque not held at 0 before T4': (
-        '    stDrive.nTargetTorque   := 0;\n    stDrive.nModeBits       := 0;',
-        '    stDrive.nModeBits       := 0;',
+        '        stDrive.nTargetTorque   := 0;\n        stDrive.nModeBits       := 0;',
+        '        stDrive.nModeBits       := 0;',
         Enabling, 'test_csv_and_cst_enable_with_zero_set_points'),
     'set-points pulled back while enabled': (
-        'ELSIF (eDriveState <> E_Cia402State.OperationEnabled)\n      AND (eDriveState <> '
-        'E_Cia402State.QuickStopActive)\nTHEN',
+        'ELSIF (eDriveState <> E_Cia402State.OperationEnabled)\n          AND (eDriveState <> '
+        'E_Cia402State.QuickStopActive)\n    THEN',
         'ELSIF TRUE THEN',
         Disabling, 'test_set_points_are_held_on_the_way_down'),
     'stale mode bits kept': (
-        '    stDrive.nModeBits       := 0;\n',
+        '        stDrive.nModeBits       := 0;\n',
         '',
         Enabling, 'test_stale_mode_bits_are_cleared_before_valid'),
     'caller bits on the first valid scan': (
@@ -2217,30 +2295,30 @@ BROKEN_RULES = {
         'IF nMode = 6 THEN',
         Enabling, 'test_mode_bits_pass_only_while_valid'),
     'mode bits before valid': (
-        '        stDrive.nControlword := 16#0006;   // T2',
-        '        stDrive.nControlword := 16#0006 OR stDrive.nModeBits;   // T2',
+        '            stDrive.nControlword := 16#0006;   // T2',
+        '            stDrive.nControlword := 16#0006 OR stDrive.nModeBits;   // T2',
         Enabling, 'test_mode_bits_pass_only_while_valid'),
     'way down abandons a T4 on its way': (
-        '        ELSIF NOT bEnable THEN\n            eStep := E_Cia402Step.AbortEnable;',
-        '        ELSIF NOT bEnable THEN\n            eStep := E_Cia402Step.Disabled;',
+        '            ELSIF NOT bEnable THEN\n                eStep := E_Cia402Step.AbortEnable;',
+        '            ELSIF NOT bEnable THEN\n                eStep := E_Cia402Step.Disabled;',
         Latency, 'test_enable_dropped_at_every_scan_of_the_way_up'),
     'T9 from a stale Switched on': (
-        '                    stDrive.nControlword := 16#0002;\n                END_IF\n'
-        '            E_Cia402State.Fault,',
-        '                    stDrive.nControlword := 16#0000;\n                END_IF\n'
-        '            E_Cia402State.Fault,',
+        '                        stDrive.nControlword := 16#0002;\n                    END_IF\n'
+        '                E_Cia402State.Fault,',
+        '                        stDrive.nControlword := 16#0000;\n                    END_IF\n'
+        '                E_Cia402State.Fault,',
         StaleWordOnTheWayDown, 'test_drop_to_switched_on_while_running'),
     "tStopTimeout taken for 0x0002's way out": (
-        '                IF fbEnableWordOff.Q AND NOT bDriveMoved THEN\n'
-        '                    stDrive.nControlword := 16#0000;',
-        '                IF fbStepTimer.Q THEN\n'
-        '                    stDrive.nControlword := 16#0000;',
+        '                    IF fbEnableWordOff.Q AND NOT bDriveMoved THEN\n'
+        '                        stDrive.nControlword := 16#0000;',
+        '                    IF fbStepTimer.Q THEN\n'
+        '                        stDrive.nControlword := 16#0000;',
         NoBit2, 'test_way_down_from_each_state'),
     'no way out of 0x0002 for a drive that ignores bit 2': (
-        '                IF fbEnableWordOff.Q AND NOT bDriveMoved THEN\n'
-        '                    stDrive.nControlword := 16#0000;',
-        '                IF FALSE THEN\n'
-        '                    stDrive.nControlword := 16#0000;',
+        '                    IF fbEnableWordOff.Q AND NOT bDriveMoved THEN\n'
+        '                        stDrive.nControlword := 16#0000;',
+        '                    IF FALSE THEN\n'
+        '                        stDrive.nControlword := 16#0000;',
         NoBit2, 'test_way_down_from_each_state'),
     'the time since 0x000F never re-armed': (
         'fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,',
@@ -2251,8 +2329,8 @@ BROKEN_RULES = {
         'fbEnableWordOff(IN := stDrive.nControlword <> 16#000F,',
         StaleWordOnTheWayDown, 'test_drop_during_homing'),
     'T5 on top of a T11 that the late statusword has not shown': (
-        '                   OR ((stDrive.nControlword = 16#0002)\n'
-        '                       AND NOT fbEnableWordOff.Q)\n',
+        '                       OR ((stDrive.nControlword = 16#0002)\n'
+        '                           AND NOT fbEnableWordOff.Q)\n',
         '',
         StaleWordOnTheWayDown, 'test_drop_to_switched_on_while_running'),
     "0x0002's way out re-armed by the state the drive shows": (
@@ -2268,63 +2346,65 @@ BROKEN_RULES = {
         'ELSIF FALSE THEN',
         Errors, 'test_statusword_0000_while_running'),
     'undecodable statusword keeps the drive enabled': (
-        '                ELSE\n'
-        '                    stDrive.nControlword := stDrive.nControlword AND 16#0007;',
-        '                ELSE\n'
-        '                    ;',
+        '                    ELSE\n'
+        '                        stDrive.nControlword := stDrive.nControlword\n'
+        '                                                AND 16#0007;',
+        '                    ELSE\n'
+        '                        ;',
         Errors, 'test_statusword_that_decodes_to_nothing'),
     'one scan of Fault gets 0x0000': (
-        '            E_Cia402State.Fault, E_Cia402State.FaultReactionActive,\n'
-        '            E_Cia402State.Unknown:',
-        '            E_Cia402State.Fault, E_Cia402State.FaultReactionActive:\n'
-        '                stDrive.nControlword := 16#0000;\n'
-        '            E_Cia402State.Unknown:',
+        '                E_Cia402State.Fault, E_Cia402State.FaultReactionActive,\n'
+        '                E_Cia402State.Unknown:',
+        '                E_Cia402State.Fault, E_Cia402State.FaultReactionActive:\n'
+        '                    stDrive.nControlword := 16#0000;\n'
+        '                E_Cia402State.Unknown:',
         BadStatusword, 'test_running_with_the_target_moving'),
     'one scan of at rest gets 0x0000': (
-        '            IF bDriveMoved THEN\n',
-        '            IF FALSE THEN\n',
+        '                IF bDriveMoved THEN\n',
+        '                IF FALSE THEN\n',
         BadStatusword, 'test_running_with_the_target_moving'),
     'one scan of Switched on gets 0x0000 in a long stop': (
         'IF fbEnableWordOff.Q AND NOT bDriveMoved THEN',
         'IF fbEnableWordOff.Q THEN',
         BadStatusword, 'test_in_a_stop_longer_than_tstatetimeout'),
     'one scan of at rest cuts a commanded quick stop': (
-        'bAtRest := NOT bDriveMoved\n           AND ((eDriveState',
-        'bAtRest := TRUE\n           AND ((eDriveState',
+        'bAtRest := NOT bDriveMoved\n               AND ((eDriveState',
+        'bAtRest := TRUE\n               AND ((eDriveState',
         BadStatusword, 'test_in_a_quick_stop_longer_than_tstatetimeout'),
     'one scan of at rest starts T2': (
         'ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut\n',
         'ELSIF bEnable AND NOT bUpWordOut\n',
         BadStatusword, 'test_enable_raised_on_the_scan'),
     'one scan of at rest releases a quick stop': (
-        'bAtRest := NOT bDriveMoved\n           AND ((eDriveState',
-        'bAtRest := TRUE\n           AND ((eDriveState',
+        'bAtRest := NOT bDriveMoved\n               AND ((eDriveState',
+        'bAtRest := TRUE\n               AND ((eDriveState',
         BadStatusword, 'test_a_pulsed_quick_stop_stays_held'),
     '0x0002 chasing 0x0000 on the first scan of a state': (
-        '                ELSIF fbEnableWordOff.Q THEN\n'
-        '                    stDrive.nControlword := stDrive.nControlword AND 16#0007;\n',
+        '                    ELSIF fbEnableWordOff.Q THEN\n'
+        '                        stDrive.nControlword := stDrive.nControlword\n'
+        '                                                AND 16#0007;\n',
         '',
         NoBit2, 'test_a_stop_longer_than_tstatetimeout_does_not_chase'),
     'set-point not made safe on the first scan of Operation enabled': (
-        '   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
-        '   OR bDriveMoved\n',
+        '       OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
+        '       OR bDriveMoved\n',
         ModeSwitch, 'test_change_on_the_scan_operation_enabled_shows_is_still_made_safe_first'),
     'the word kept at rest keeps bit 3': (
-        '            IF bDriveMoved THEN\n'
-        '                stDrive.nControlword := stDrive.nControlword AND 16#0007;',
-        '            IF bDriveMoved THEN\n'
-        '                stDrive.nControlword := stDrive.nControlword AND 16#000F;',
+        '                IF bDriveMoved THEN\n'
+        '                    stDrive.nControlword := stDrive.nControlword AND 16#0007;',
+        '                IF bDriveMoved THEN\n'
+        '                    stDrive.nControlword := stDrive.nControlword AND 16#000F;',
         BadStatusword, 'test_the_word_kept_has_only_bits_0_to_2'),
     'one scan of at rest gets 0x0000 with a quick stop held': (
-        '            IF bDriveMoved THEN\n',
-        '            IF bDriveMoved AND NOT bQuickStopHeld THEN\n',
+        '                IF bDriveMoved THEN\n',
+        '                IF bDriveMoved AND NOT bQuickStopHeld THEN\n',
         BadStatusword, 'test_after_a_refused_t11_with_the_drive_still_enabled'),
     'one scan of Switched on gets 0x0000 in an error': (
         'IF fbEnableWordOff.Q AND NOT bDriveMoved THEN',
         'IF fbEnableWordOff.Q AND NOT (bDriveMoved AND (eStep = E_Cia402Step.Disabled)) THEN',
         BadStatusword, 'test_in_an_error_with_the_drive_still_enabled'),
     'one scan of another state zeroes velocity or torque': (
-        '   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
+        '       OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
         '',
         BadStatusword, 'test_running_with_another_set_point_moving'),
     'one scan of Fault starts a reset': (
@@ -2332,42 +2412,46 @@ BROKEN_RULES = {
         'IF bResetRequest THEN',
         BadStatusword, 'test_a_reset_on_the_scan'),
     'one scan of another state steps the target': (
-        '   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
+        '       OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))\n',
         '',
         BadStatusword, 'test_running_with_the_target_moving'),
     'drop out enabled again without reset': (
-        '            nErrorID := cErrLeftState;\n            eStep    := E_Cia402Step.Error;\n'
-        '        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> '
-        'stDrive.nModesDisplay)\n        THEN\n            eStep := E_Cia402Step.SetMode;\n'
-        '        END_IF\n\n    E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:',
-        '            eStep    := E_Cia402Step.Disabled;\n'
-        '        ELSIF (nMode <> stDrive.nModesOfOperation)\n              OR (nMode <> '
-        'stDrive.nModesDisplay)\n        THEN\n            eStep := E_Cia402Step.SetMode;\n'
-        '        END_IF\n\n    E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:',
-        Errors, 'test_drive_that_drops_out_is_not_enabled_again_without_reset'),
-    'a drive out of Fault left waiting in the reset': (
-        '            ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN\n'
-        '                nErrorID := 0;\n'
-        '                eStep    := E_Cia402Step.Disabled;\n'
-        '            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n'
         '                nErrorID := cErrLeftState;\n'
         '                eStep    := E_Cia402Step.Error;\n'
-        '            END_IF\n        END_IF\n\n    E_Cia402Step.ResetEdge:',
-        '            END_IF\n        END_IF\n\n    E_Cia402Step.ResetEdge:',
+        '            ELSIF (nMode <> stDrive.nModesOfOperation)\n                  OR (nMode <> '
+        'stDrive.nModesDisplay)\n            THEN\n'
+        '                eStep := E_Cia402Step.SetMode;\n'
+        '            END_IF\n\n        E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:',
+        '                eStep    := E_Cia402Step.Disabled;\n'
+        '            ELSIF (nMode <> stDrive.nModesOfOperation)\n                  OR (nMode <> '
+        'stDrive.nModesDisplay)\n            THEN\n'
+        '                eStep := E_Cia402Step.SetMode;\n'
+        '            END_IF\n\n        E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:',
+        Errors, 'test_drive_that_drops_out_is_not_enabled_again_without_reset'),
+    'a drive out of Fault left waiting in the reset': (
+        '                ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN\n'
+        '                    nErrorID := 0;\n'
+        '                    eStep    := E_Cia402Step.Disabled;\n'
+        '                ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n'
+        '                    nErrorID := cErrLeftState;\n'
+        '                    eStep    := E_Cia402Step.Error;\n'
+        '                END_IF\n            END_IF\n\n        E_Cia402Step.ResetEdge:',
+        '                END_IF\n            END_IF\n\n        E_Cia402Step.ResetEdge:',
         FaultReset, 'test_a_drive_that_leaves_fault_by_itself_in_the_reset'),
     'a short bad word out of Fault ends the reset': (
-        '        IF fbStepTimer.Q THEN\n            IF eDriveState = E_Cia402State.Fault THEN\n',
-        '        IF fbStepTimer.Q OR NOT bDriveMoved THEN\n'
-        '            IF eDriveState = E_Cia402State.Fault THEN\n',
+        '            IF fbStepTimer.Q THEN\n'
+        '                IF eDriveState = E_Cia402State.Fault THEN\n',
+        '            IF fbStepTimer.Q OR NOT bDriveMoved THEN\n'
+        '                IF eDriveState = E_Cia402State.Fault THEN\n',
         BadStatusword, 'test_in_a_reset_it_spends_no_attempt'),
     'Fault reaction active taken for out of Fault in the reset': (
-        '            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n',
-        '            ELSE\n',
+        '                ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN\n',
+        '                ELSE\n',
         FaultReset, 'test_fault_reaction_active_in_the_reset_waits_for_fault'),
     'a fault reset with no limit': (
-        '    ELSIF bResetting AND fbResetLimit.Q THEN\n'
-        '        nErrorID := cErrResetTime;\n'
-        '        eStep    := E_Cia402Step.Error;\n',
+        '        ELSIF bResetting AND fbResetLimit.Q THEN\n'
+        '            nErrorID := cErrResetTime;\n'
+        '            eStep    := E_Cia402Step.Error;\n',
         '',
         ResetTimeLimit, 'test_a_drive_that_stays_in_fault_reaction_active'),
     "the reset's limit re-armed by a state change": (
@@ -2375,33 +2459,51 @@ BROKEN_RULES = {
         'fbResetLimit(IN := bResetting AND NOT bDriveMoved\n',
         ResetTimeLimit, 'test_a_statusword_that_changes_state_on_every_scan'),
     "the reset's limit not restarted for the next attempt": (
-        '                   AND NOT (bStepEntered AND (eStep = E_Cia402Step.ResetPause)),\n',
-        '                   AND TRUE,\n',
+        '                       AND NOT (bStepEntered\n'
+        '                                AND (eStep = E_Cia402Step.ResetPause)),\n',
+        '                       AND TRUE,\n',
         ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
     "the reset's limit left out the fault reaction": (
-        '                   + stConfig.tStateTimeout + stConfig.tStopTimeout);',
-        '                   + stConfig.tStateTimeout);',
+        '                       + stConfig.tStateTimeout + stConfig.tStopTimeout);',
+        '                       + stConfig.tStateTimeout);',
         ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
     "the reset's limit left no margin for the scans": (
-        '             PT := stConfig.tResetPause + stConfig.tStateTimeout\n',
-        '             PT := stConfig.tResetPause\n',
+        '                 PT := stConfig.tResetPause + stConfig.tStateTimeout\n',
+        '                 PT := stConfig.tResetPause\n',
         ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
     "the reset's limit left out the pause": (
-        '             PT := stConfig.tResetPause + stConfig.tStateTimeout\n',
-        '             PT := stConfig.tStateTimeout\n',
+        '                 PT := stConfig.tResetPause + stConfig.tStateTimeout\n',
+        '                 PT := stConfig.tStateTimeout\n',
         ResetTimeLimit, 'test_the_longest_attempt_is_no_timeout'),
     "the reset's limit restarted by every step": (
-        '                   AND NOT (bStepEntered AND (eStep = E_Cia402Step.ResetPause)),\n',
-        '                   AND NOT bStepEntered,\n',
+        '                       AND NOT (bStepEntered\n'
+        '                                AND (eStep = E_Cia402Step.ResetPause)),\n',
+        '                       AND NOT bStepEntered,\n',
         ResetTimeLimit, 'test_no_step_restarts_the_limit'),
     "the fault reset taken for a drive that refuses 0x0002": (
-        '                       AND NOT bResetting,\n',
-        '                       AND TRUE,\n',
+        '                           AND NOT bResetting,\n',
+        '                           AND TRUE,\n',
         ResetTimeLimit, 'test_a_drive_that_stays_in_fault_reaction_active'),
     "the reset's limit kept after the reset": (
         'fbResetLimit(IN := bResetting\n',
         'fbResetLimit(IN := (bResetting OR bError)\n',
         ResetTimeLimit, 'test_the_limit_ends_with_the_reset'),
+    'stale homing error taken before the drive had the start': (
+        'Homing),\n                  PT := stConfig.tStateTimeout);',
+        'Homing),\n                  PT := T#0MS);',
+        Homing, 'test_retry_after_a_homing_error'),
+    'a refused homing method waits for tHomingTimeout': (
+        'ELSIF (bHomingRunSeen OR fbHomingStart.Q)\n',
+        'ELSIF bHomingRunSeen\n',
+        Homing, 'test_method_rejected_at_once_after_an_earlier_error'),
+    'inputs read while bInputsValid is FALSE': (
+        'IF NOT bInputsValid THEN\n',
+        'IF FALSE THEN\n',
+        InputsInvalid, 'test_one_invalid_scan_while_enabled_is_no_error'),
+    'a quick stop lost while the inputs are not valid': (
+        '    IF bQuickStop THEN\n        bQuickStopHeld := TRUE;\n    END_IF\n',
+        '',
+        InputsInvalid, 'test_a_quick_stop_asked_meanwhile_goes_out'),
 }
 
 

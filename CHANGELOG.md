@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+**Skill**
+
+- Description: TwinCAT NC axes and MC_ blocks go to twincat-motion; CODESYS SoftMotion and
+  servo loop tuning are named on their own, since no sibling covers them. Both were added under
+  "Not for" after Opus 5.5 loaded the skill on them; the trigger evals were not rerun after the
+  last wording change.
+- Hand-offs: rows for a CODESYS SoftMotion axis (answer only the drive part) and servo loop
+  tuning (twincat-scope reads a recording).
+
+**Tool (`scripts/cia402.py`)**
+
+- `trace`: decodes a recorded controlword/statusword log (a TwinCAT Scope CSV export or
+  similar), lists each change of command, state and mode with its transition, and flags rules
+  1, 2, 5, 7 and 8 of `state-machine.md`.
+- `plan`: `--mode-change-at-standstill` and `--homing-method-at-t3`, behaviour flags for drives
+  that need them (Nidec, Mitsubishi, Panasonic).
+
+**Templates**
+
+- `FB_Cia402Axis`: a `bInputsValid` input, default TRUE. Wire it to WcState 0 and the slave in
+  OP. While it is FALSE the FB reads nothing, changes no step and keeps every output, the
+  controlword included; only `bQuickStop` still sends 0x0002. Longer than the new
+  `stConfig.tInputsInvalid` (default T#100MS) is the new error 16#8116. The FB now has 12 pins.
+- Fixed a homing error found only after `tHomingTimeout`. A drive that refused the method, with
+  bit 13 left from an earlier run, never showed the run in progress, so the error was ignored
+  as stale. Bit 13 still set `tStateTimeout` after bit 4 went out is now 16#8114.
+- Tests: a drive that reads 0x6040 only every few scans, at every phase of enable, mode
+  switch, quick stop and fault reset.
+
+**References**
+
+- Vendor pages: Nidec (SI-EtherCAT, Digitax HD M753), Festo CMMT, Rexroth ctrlX DRIVE,
+  Kollmorgen AKD, SEW MOVI-C, STOBER SC6/SI6, Yaskawa Sigma-V, Mitsubishi MR-J4-TM, Delta
+  ASDA-A3-EP, Leadshine, KEB COMBIVERT F6/S6, Panasonic MINAS A6BN, Schneider Lexium 32M and
+  Elmo Gold Line. Beckhoff adds AX8000, EL70x7, AX1000 and AF1000; Lenze goes deeper. The
+  porting table is split into stopping/state machine and motion.
+- `state-machine.md`: how long a drive takes to act and to show it, and how to size timeouts.
+- `homing.md`: under a motion runtime, re-sync the master's set position after homing.
+- `objects.md`: 0x6086 lists the profile's values (0 linear, 1 sin², 2 jerk-free, 3
+  jerk-limited); negative values are the manufacturer's.
+- `errors.md`: 0x603F read as a vendor text ID. `modes.md`: mode 15, the AX8000's own CSPAF.
+
+**Evals**
+
+- Rounds v0.2 to v0.4 with harder tasks, graded by an independent judge (`judge.py`) blind to
+  the arm. Results in `evals/results-ab-v0.2.md` to `results-ab-v0.4.md`.
+
+**CI**
+
+- Vendor pages must carry a read date (older than a year warns), and every page needs a row in
+  the index and in each porting table. `check_private.py` also scans untracked files.
+
 ## 0.2.0 — 2026-11-07
 
 `FB_Cia402Axis` gets a quick-stop input and loses the hangs and false errors found in its fault

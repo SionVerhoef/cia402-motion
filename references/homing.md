@@ -108,7 +108,7 @@ compatibility switches for drives that set these bits in their own order (`vendo
    follow too: when the drive sets its new zero, the actual position jumps, but the NC axis still
    holds its old set position. Re-sync it to the new actual before cyclic position resumes, or
    the axis jumps or trips on following error. The master side (`MC_SetPosition`, clearing the
-   lag) belongs to **twincat-motion**.
+   lag) belongs to **twincat-motion** on TwinCAT NC.
 
 After an error: read 0x603F and the drive's diagnostics. Check the switch wiring and polarity,
 the method, the speeds and the limits, then start again with a new rising edge on bit 4.

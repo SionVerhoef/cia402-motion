@@ -1,6 +1,6 @@
 ---
 name: cia402-motion
-description: "Load before answering any question about a CiA 402 / DS402 (IEC 61800-7) servo, stepper or frequency-inverter (VFD) drive over EtherCAT (CoE) or CANopen: vendors depart from the profile in ways that look standard, and this skill holds the checked facts and a sequence planner. Covers a drive that won't enable or is stuck in Switch on disabled or Fault, statusword and controlword values, fault reset, quick stop and halt, modes (CSP, CSV, CST, PP, PV, VL, homing) and the 0x6060/0x6061 mode switch, homing methods (0x6098), touch probe, user units and gear/feed (0x608F, 0x6091, 0x6092), 0x603F error codes, PDO mapping per mode, CANopen NMT/SYNC/PDO bring-up, and any vendor's drive, with checked pages on where named drive families depart from it. Not for TwinCAT NC or CODESYS SoftMotion axes and MC_ blocks (twincat-motion), servo loop tuning, EtherCAT network faults (ethercat-diagnostics), ESI files (ethercat-esi), SERCOS/SoE drives (AX5000), or safety PLC logic (TwinSAFE); never writes safety functions (STO, SLS)."
+description: "Load before answering any question about a CiA 402 / DS402 (IEC 61800-7) servo, stepper or frequency-inverter (VFD) drive over EtherCAT (CoE) or CANopen: vendors depart from the profile in ways that look standard, and this skill holds the checked facts and a sequence planner. Covers a drive that won't enable or is stuck in Switch on disabled or Fault, statusword and controlword values, fault reset, quick stop and halt, modes (CSP, CSV, CST, PP, PV, VL, homing) and the 0x6060/0x6061 mode switch, homing methods (0x6098), touch probe, user units and gear/feed (0x608F, 0x6091, 0x6092), 0x603F error codes, PDO mapping per mode, CANopen NMT/SYNC/PDO bring-up, and any vendor's drive, with checked pages on where named drive families depart from it. Not for TwinCAT NC axes and MC_ blocks (twincat-motion), CODESYS SoftMotion, servo loop tuning, EtherCAT network faults (ethercat-diagnostics), ESI files (ethercat-esi), SERCOS/SoE drives (AX5000), or safety PLC logic (TwinSAFE); never writes safety functions (STO, SLS)."
 ---
 
 # cia402-motion
@@ -102,6 +102,8 @@ Load a reference when the task reaches it, not all of them up front.
 | Slaves not in OP, WcState ≠ 0, frame loss, DC/SYNC0 errors, SDO aborts, mapping rejected | **ethercat-diagnostics** |
 | What a particular device supports (modes, objects, ranges, PDOs), or its ESI file | **ethercat-esi** |
 | TwinCAT NC axis, MC_ blocks, NC scaling, NC homing; `MC_Power` while the drive is fine | **twincat-motion** |
+| CODESYS SoftMotion axis and its MC_ blocks | no sibling covers it: answer only the drive part |
+| Servo loop tuning (gains, filters, autotune) | no skill covers it; **twincat-scope** reads a recording |
 | Writing or reviewing the PLC code | **twincat-st** (and its reviewer) |
 | Diagnosing from a TwinCAT Scope recording | **twincat-scope** |
 
