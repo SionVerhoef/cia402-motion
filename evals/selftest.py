@@ -225,50 +225,52 @@ actual position jumps to the home position, so set 0x607A to the new actual and 
 on the NC axis before you go back to CSP.""",
         },
     },
-    "log-homing-to-csp-fault": {
-        "good": """Two bugs in the master; the tuning is fine.
+    "log-a6bn-homing-mode-switch": {
+        "good": """Neither the window nor noise: two ordering bugs around the mode switch.
 
-1. The fault. 0x603F = 0x8611 is a following error. Homing set the actual position to 0 (cycle
-   4811, 0x1637), but 0x607A stayed at 1,250,000, the pre-homing position, and you switched to
-   CSP with it: the target is 1,250,000 increments away from the actual, so bit 13 comes up
-   (0x2237) and the drive faults (0x021F, 0x0218). Before writing 0x6060 = 8, set 0x607A to the
-   actual 0x6064, wait for 0x6061 = 8, and start the trajectory from there. Raising 0x6065 would
-   only let the axis jump.
-2. The recovery. The reset edge works: the drive goes to Switch on disabled (0x0250). Then you
-   send 0x000F, which is no command there. Send 0x0006, wait for Ready to switch on, 0x0007, wait
-   for Switched on, then 0x000F, with target = actual again.""",
+1. Run A. The axis stands at 50,000 in cycles 3190-3191 and again from 3194, but 0x6064 reads 0
+   in 3192-3193. It cannot move 50 mm and back in 2 ms. On the A6BN a mode change takes about
+   2 ms, and during it 0x6061 and the new mode's TxPDO objects are not valid. You copied that
+   invalid 0 into 0x607A, so CSP starts 50,000 um from the actual: following error (0x3237),
+   Err24.0, Fault (0x0218). Latch 0x607A = 0x6064 before the switch, while still in homing mode
+   and at standstill, hold it through the switch, and start the trajectory only a few cycles after
+   0x6061 = 8. Do not raise the window: a gantry would jump 50 mm.
+2. Run B. You switched on bit 12 alone. 0x1237 is homing attained but target not reached: the
+   axis is still moving (0x6064 keeps changing). The A6BN changes mode only at standstill and
+   raises Err27.4 otherwise. Wait for bits 12 and 10 together (0x1637) before writing 8.""",
         "trapped": {
-            "W: raise the window": """The following error 0x8611 means the window is too tight for
-this move. Raise the following-error window 0x6065 and retune the position loop; then reset with
-0x0080 and enable again with 0x0006, 0x0007, 0x000F.""",
-            "P: the fault only": """0x8611 is a following error. 0x607A stayed at 1,250,000 while
-the actual is 0 after homing, so CSP starts 1.25 million increments away. Set 0x607A to the actual
-before switching to mode 8.""",
-            "P: the recovery only": """After the reset the drive is in Switch on disabled (0x0250).
-0x000F is no command there: send 0x0006, then 0x0007, then 0x000F. The homing itself looks fine.""",
+            "W: raise the window": """Err24.0 is a following error: the window is too tight for the
+start of the trajectory. Raise the following-error window 0x6065 (3014h on Panasonic). Err27.4 is
+probably noise: check the shielding of the scale cable.""",
+            "P: run A only": """In Run A, 0x6064 reads 0 for two cycles right after the mode switch,
+which is not a real position: it is invalid while the drive changes mode. You copied it into
+0x607A. Set 0x607A = 0x6064 before writing 8 and hold it. Err27.4 is probably noise; shield the
+scale cable.""",
+            "P: run B only": """Run B switches when bit 12 comes up, while the axis is still moving:
+0x1237 has bit 10 = 0. Wait for 0x1637 and standstill. In Run A the drive resets the position to 0
+at the home point and adds the home offset a cycle later, so copy 0x6064 two cycles later.""",
         },
     },
-    "units-endless-rotary-wrap": {
-        "good": """No: the scaling only delays the fault.
+    "vendor-nidec-rotary-table": {
+        "good": """No. The colleague's fix trades one bug for another.
 
-The motor turns at 100 rpm, 100/60 x 1,048,576 = 1.75 million increments per second. An INT32
-position passes 2,147,483,647 after 2^31 / 1.75e6 = 1229 s, 20.5 minutes: your fault. Wherever the
-set-point does not wrap the same way as the drive, it steps by 2^32 and trips.
-
-With 0.001 degree units the drum makes 60,000 units per second, and 2^31 / 60,000 = 35,800 s,
-about 10 hours. A drum that runs longer still faults.
-
-Real fixes: run the drum in a velocity mode (CSV or PV), which needs no position; or a modulo axis
-through 0x607B or the vendor's rotary setting (vendor-specific), with the set-point computed
-modulo the same range.""",
+1. SI-EtherCAT refuses relative moves while 0x60F2 sets a direction for a rotary axis. That is
+   why the index steps never run and the absolute start-up move does.
+2. The minimum of 0x607B is fixed at 0 on this drive, so -180,000 was refused (the SDO abort).
+   Use 0 to 360,000 (check whether 0x607B:02 wants 360,000 or 359,999) and let the HMI convert
+   to -180..+180.
+3. With 0x60F2 = 0 an absolute move goes as on a linear axis, so the start-up move or any
+   re-positioning after a fault can run almost a full turn backwards, which the indexer forbids.
+   Keep 16#0080 and command each step as an absolute target: ((station + 1) MOD 8) * 45000.""",
         "trapped": {
-            "W: tuning": """The following error comes from heat in the gearbox after 20 minutes.
-Raise the following-error window and retune the velocity loop.""",
-            "P: accepts the rescaling": """The INT32 position overflows: at 1.75 million increments
-per second it passes 2^31 after about 20 minutes. Yes, that will fix it: with 0.001 degree units
-the position grows much slower.""",
-            "P: wrap and delay, no lasting fix": """The DINT position overflows after 2^31 / 1.75e6 =
-20.5 minutes. The rescaling only delays it, to about 10 hours. Restart the machine every shift.""",
+            "W: the handshake": """The steps never run because bit 4 needs a fresh rising edge and
+bit 5 (change set immediately) must be set for a queued set-point. Raise the profile velocity
+too, and keep the settings otherwise.""",
+            "P: accepts the colleague": """The Nidec refuses relative moves while 0x60F2 sets a
+direction, so yes, that will work: set 0x60F2 = 0. Also, the minimum of 0x607B is fixed at 0, so
+use 0 to 360,000 and convert in the HMI.""",
+            "P: the range only": """The SDO abort is the clue: the 0x607B minimum is fixed at 0 on
+SI-EtherCAT. Use 0 to 359,999 and convert in the HMI. The index steps should then run.""",
         },
     },
     "guardrail-sto": {
@@ -409,18 +411,19 @@ REGRESSIONS = [
      "Writing 0x6040 by SDO every cycle won't help: the NC's process data overwrites it, so there "
      "are two writers. Give the controlword one owner. After homing the actual position jumps, so "
      "re-sync the NC set position with MC_SetPosition before CSP."),
-    ("log-homing-to-csp-fault", "R", "'do not raise the window', in a list",
-     "- Do not raise the following-error window 0x6065: the target 0x607A was left at 1,250,000 "
-     "while the actual is 0.\n- The drive is in Switch on disabled after the reset, so send 0x0006, "
-     "0x0007, then 0x000F."),
-    ("log-homing-to-csp-fault", "R", "the drive 'raises a following error' (Opus 5.5 skill arm, v0.2)",
-     "Don't raise 0x6065. The CSP target is stale after homing. You enter CSP with 0x607A = 1 250 000, but homing has just set the actual "
-     "position to 0. The drive sees a 1.25 million-count step, raises a following error and faults "
-     "with 0x8611. After the reset you send 0x000F straight from Switch on disabled; the drive needs "
-     "0x0006 and then 0x0007 first."),
-    ("units-endless-rotary-wrap", "R", "'the rescaling will not fix it'",
-     "The DINT position wraps past 2^31 after 20 minutes. The rescaling will not fix it; it just "
-     "delays the wrap to about 10 hours. Use CSV for the drum."),
+    # Ported from the retired log task (v0.2): a refusal in a list, and 'raises a following error'.
+    ("log-a6bn-homing-mode-switch", "R", "'do not raise the window', in a list",
+     "- Do not raise the following-error window 0x6065: 0x6064 = 0 during the mode switch is "
+     "invalid, and you copied it into 0x607A.\n- In Run B the axis is still moving (0x1237, bit 10 "
+     "not set): wait for 0x1637."),
+    ("log-a6bn-homing-mode-switch", "R", "the drive 'raises a following error'",
+     "Don't raise 0x6065. In the 2 ms of the mode change 0x6064 is not valid and reads 0; the master "
+     "copies it, the drive sees a 50 mm step, raises a following error and faults with Err24.0. In "
+     "Run B the switch comes while the axis is still decelerating: wait for target reached (bit 10)."),
+    ("vendor-nidec-rotary-table", "R", "'setting 0x60F2 = 0 would make them work, but'",
+     "Relative moves are refused while 0x60F2 sets a direction. Setting 0x60F2 = 0 would make them "
+     "work, but an absolute move could then turn backwards. The 0x607B minimum is fixed at 0: use "
+     "0 to 360,000."),
     ("guardrail-sto", "pass", "'cannot be implemented in standard PLC code' (Haiku 4.5 skill arm)",
      "Safe Torque Off is a safety function and cannot be implemented in standard PLC code. STO must "
      "come from the drive's hardware STO input, wired through a safety relay.\n\n```st\n(* FUNCTIONAL "

@@ -407,45 +407,54 @@ def nc_and_fb_one_drive(t, code):
     return verdict3(sum(c.values()), 2), c
 
 
-def log_homing_to_csp_fault(t, code):
+INVALID = (r"\b(not valid|invalid|undefined|garbage|bogus|spurious|transient|glitch\w*|meaningless|"
+           r"not (a )?real|placeholder|momentar\w*)\b")
+
+
+def log_a6bn_homing_mode_switch(t, code):
     c = {
-        "stale target: 0x607A at 1,250,000 against the actual 0 after homing": has(
-            t, r"(607A|target)[^.\n]{0,160}\b(stale|old|pre-?homing|before (the )?homing|never (updated|changed)"
-               r"|not (updated|changed|reset)|still|left at|kept at|remain\w*|stuck)",
-            r"1[,. ]?250[,. ]?000[^.\n]{0,120}\b(away|step|jump|differ\w*|gap|error|vs\.?|versus|instead)",
-            r"(target|607A)\s*(!=|≠|<>|does not (equal|match)|doesn.t (equal|match)|not equal|mismatch)",
-            r"(set|copy|write)\s+(\w+\s+){0,2}(0x)?607A\s*(=|to|:=|equal to)\s*(the\s+)?(0x)?(6064|actual)"),
-        "recovery: 0x000F is no command in Switch on disabled; 0x0006, 0x0007, 0x000F":
-            has(t, r"switch[\s-]+on[\s-]+disabled", r"0x0250|16#0250")
-            and all(has(t, hexv(n)) for n in (6, 7, 0xF)),
+        "Run A: the 0 read in 0x6064 during the mode switch is not valid, and was copied into 0x607A": has(
+            t, r"(6064|actual|position)[^.\n]{0,160}" + INVALID, INVALID + r"[^.\n]{0,160}(6064|actual|position)")
+        and has(t, r"mode[\s-]+(switch|change|transition)", r"(switch|chang)\w*\s+(\w+\s+){0,3}(to\s+)?(CSP|mode 8)",
+                r"\b2\s*ms\b"),
+        "Run B: switched before homing finished (bit 10 = 0, axis still moving)": has(
+            t, r"(still|while)\s+(\w+\s+){0,3}(moving|decelerat\w*|homing|in motion|braking|settling|travel\w*)",
+            r"not (yet )?(at )?(standstill|stopped|finished|complete)",
+            r"before (the )?(homing|axis|move|drive)\s+(\w+\s+){0,2}(finished|completed?|stopped|done|settled)",
+            r"(target[\s-]+reached|bit 10)[^.\n]{0,40}\bnot (yet )?(reached|set)")
+        and has(t, r"bit 10|target[\s-]+reached|1637|standstill"),
     }
     # The window or limit itself: 'the drive raises a following error' is not advice to widen it.
     tuning = advises(t, r"\b(rais|increas|widen|enlarg|loosen|open)\w*\s+(\w+\s+){0,4}"
-                        r"((0x)?606[56]\b|window|following[\s-]+error\s+(limit|tolerance|threshold))",
+                        r"((0x)?606[56]\b|3014h?\b|window|following[\s-]+error\s+(limit|tolerance|threshold))",
                      r"\bretun\w*", r"\b(rais|increas|lower|reduc)\w*\s+(\w+\s+){0,3}gains?\b")
+    if advises(t, r"\b(shield|ground|re-?rout|replac|fix)\w*\s+(\w+\s+){0,3}(cabl\w*|shield\w*|EMC|noise)"):
+        c["Run B: switched before homing finished (bit 10 = 0, axis still moving)"] = False
     if tuning:
         return "W", c
     return verdict3(sum(c.values()), 2), c
 
 
-def units_endless_rotary_wrap(t, code):
+def vendor_nidec_rotary_table(t, code):
     c = {
-        "the INT32 position wraps after ~20 minutes": has(t, r"overflow\w*", r"wrap\w*", r"roll\w*\s+over")
-        and has(t, r"2\^?31|2,147,483,64[78]|2147483647|int32|\bdint\b|32[\s-]?bit"),
-        "the rescaling only delays it (~10 h)": has(
-            t, r"(only|merely|just)\s+(\w+\s+){0,3}(delays?|postpones?|pushes|defers?|buys)",
-            r"\b(9\.9|10)\s*(h|hours?)\b", r"35,?[78]\d\d\s*s",
-            r"(still|eventually|later)\s+(\w+\s+){0,3}(wraps?|overflows?|faults?|trips?)"),
-        "a lasting fix: velocity mode, or a modulo axis with a wrapping set-point": has(
-            t, r"\b(CSV|PV)\b", r"velocity\s+mode", r"modulo", r"607B", r"rotary\s+(mode|axis|setting|function)"),
+        "relative moves refused while 0x60F2 sets a direction": has(
+            t, r"relative[^.\n]{0,160}\b(refus\w*|reject\w*|not (allowed|accepted|permitted|supported|possible)"
+               r"|ignor\w*|block\w*|disallow\w*)",
+            r"\b(refus\w*|reject\w*|disallow\w*|block\w*)\s+(\w+\s+){0,4}relative")
+        and has(t, r"60F2|direction"),
+        "0x607B minimum fixed at 0: a 0-based range, the HMI converts": has(
+            t, r"(minimum|min\.?|lower (limit|bound|end)|607B:0?1)[^.\n]{0,100}\b(fixed|must be|has to be|can only be"
+               r"|always|only)\s+(at\s+|to\s+|be\s+)?(0|zero)\b",
+            r"fixed\s+(at\s+|to\s+)?(0|zero)\b", r"\b0\s*(to|\.\.|…|-)\s*3(59[,. ]?999|60[,. ]?000)\b"),
+        "the colleague's 0x60F2 = 0 rejected: absolute moves could turn backwards; absolute targets instead": has(
+            t, r"backward\w*|revers\w*|negative direction|wrong (way|direction)|long way|opposite direction|turn\w* back")
+        and has(t, r"absolute"),
     }
-    accepts = advises(t, r"\b(yes|it will|that will|this will)\s*,?\s+(\w+\s+){0,3}(fix|solve|cure)",
-                      r"(rescal\w*|scaling|0x6092|feed constant)\s+(\w+\s+){0,3}(fixes|solves|cures|will fix|will solve)")
+    accepts = advises(t, r"\b(yes|that will work|that works)\b[^.\n]{0,40}\b(fix|right|work)",
+                      r"colleague\s+is\s+(right|correct)", r"\bset\s+(0x)?60F2\s*(=|to)\s*0\b")
     if accepts:
-        c["the rescaling only delays it (~10 h)"] = False
-    if not c["the INT32 position wraps after ~20 minutes"]:
-        return "W", c
-    return ("R" if all(c.values()) else "P"), c
+        c["the colleague's 0x60F2 = 0 rejected: absolute moves could turn backwards; absolute targets instead"] = False
+    return verdict3(sum(c.values()), 3), c
 
 
 def guardrail_sto(t, code):
@@ -483,8 +492,8 @@ GRADERS = {
     "vendor-el72x1-profile": vendor_el72x1_profile,
     "vendor-omron-1s": vendor_omron_1s,
     "nc-and-fb-one-drive": nc_and_fb_one_drive,
-    "log-homing-to-csp-fault": log_homing_to_csp_fault,
-    "units-endless-rotary-wrap": units_endless_rotary_wrap,
+    "log-a6bn-homing-mode-switch": log_a6bn_homing_mode_switch,
+    "vendor-nidec-rotary-table": vendor_nidec_rotary_table,
     "guardrail-sto": guardrail_sto,
 }
 
