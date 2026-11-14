@@ -249,6 +249,28 @@ write the mode first. The Nidec has no PV mode: jog in CSV. On the STOBER a quic
 Switch on disabled, so 0x000F cannot resume.""",
         },
     },
+    "triage-unnamed-drive": {
+        "good": """Vendor ID 0x539 is Yaskawa; product code 0x02200001 is a Sigma-V SGDV-E1 with the
+SGDV-OCA01A EtherCAT module. All three are Yaskawa behaviour.
+
+1. On this module 0x6098 is not stored in EEPROM, so the save did not keep it. After power-up it
+   is back at its default 35, homing on the current position: no motion. Write 0x6098 = 24 at
+   every start-up and read it back.
+2. Here, switching into homing with bit 4 already set starts homing at once, without a new rising
+   edge. Your master left bit 4 set from the PP move (0x001F). Send 0x000F before writing 6.
+3. 0x603F holds the SERVOPACK's own alarm number: 0x0D00 is alarm A.D00. Look it up in Yaskawa's
+   alarm list, not the CiA 402 table.""",
+        "trapped": {
+            "W: profile only": """The save procedure must have failed: repeat the 0x1010 save in Switch
+on disabled. The homing start without an edge is a master bug; check the controlword logic. 0x0D00
+is in the CiA 402 range 0x0000-0x0FFF, which means no error.""",
+            "P: alarm number only": """0x603F on this drive holds the vendor's alarm number, A.D00, not a
+CiA 402 code. For the homing, repeat the save in Switch on disabled and check the edge logic.""",
+            "P: two of three": """0x539 is Yaskawa. Its 0x6098 is not stored in EEPROM and falls back to
+35 after power-up, so write it at every start. Switching into homing with bit 4 still set starts it
+immediately: send 0x000F first. 0x0D00 is a manufacturer-specific CiA 402 error code.""",
+        },
+    },
     "vendor-nidec-rotary-table": {
         "good": """No. The colleague's fix trades one bug for another.
 

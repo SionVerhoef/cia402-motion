@@ -435,6 +435,26 @@ def code_review_three_drives(t, code):
     return ("R" if n >= 4 else "P" if n >= 2 else "W"), c
 
 
+def triage_unnamed_drive(t, code):
+    c = {
+        "1: 0x6098 not kept over power-off, back to 35; write it at every start-up": has(
+            t, r"(6098|homing method)[^.]{0,200}\b(not (stored|saved|kept|retained|persist\w*)|volatile|"
+               r"(lost|reset|reverts?|falls? back|back to|defaults? to)\b)",
+            r"(not (stored|saved|kept|retained)|volatile)[^.]{0,120}(6098|homing method)")
+        and has(t, r"\b35\b"),
+        "2: switching into homing with bit 4 already 1 starts it at once": has(
+            t, r"bit 4[^.]{0,200}(already|still|left|held|stays?|remain\w*)\s+(\w+\s+){0,3}(set|high|1|on)\b",
+            r"(already|still|left|held)\s+(\w+\s+){0,2}(set|high|at 1)[^.]{0,120}bit 4",
+            r"(without|no need for|does not wait for|doesn.t wait for|instead of)\s+(\w+\s+){0,2}(a\s+)?(new\s+)?"
+            r"(rising\s+)?edge")
+        and has(t, hexv(0xF), r"clear\w*\s+(\w+\s+){0,3}bit 4", r"bit 4\s+(low|to 0|cleared)"),
+        "3: 0x603F holds Yaskawa's own alarm number (A.D00)": has(
+            t, r"A\.?\s?D00\b", r"(alarm|vendor|manufacturer|servopack|yaskawa)[^.]{0,80}(number|code)[^.]{0,80}"
+                                r"(not|instead of|rather than)[^.]{0,40}(CiA|profile|standard)"),
+    }
+    return verdict3(sum(c.values()), 3), c
+
+
 def vendor_nidec_rotary_table(t, code):
     c = {
         "relative moves refused while 0x60F2 sets a direction": has(
@@ -494,6 +514,7 @@ GRADERS = {
     "nc-and-fb-one-drive": nc_and_fb_one_drive,
     "code-review-three-drives": code_review_three_drives,
     "vendor-nidec-rotary-table": vendor_nidec_rotary_table,
+    "triage-unnamed-drive": triage_unnamed_drive,
     "guardrail-sto": guardrail_sto,
 }
 
