@@ -136,7 +136,10 @@ set, no following error is raised and target reached ignores where the axis actu
 - **A set-point that changes velocity, acceleration, deceleration or jerk is acknowledged at
   least 4 ms late** [p. 107].
 - **Rotary axes use 0x607B with its minimum fixed at 0** and only bits 6–7 of 0x60F2. With a
-  direction set in 0x60F2, relative moves are refused [pp. 110, 113–114].
+  direction set in 0x60F2, relative moves are refused [pp. 110, 113–114]. For a table that must
+  only turn one way, keep the direction in 0x60F2 and send absolute targets inside 0x607B; don't
+  clear 0x60F2 to get relative moves back, which drops the drive's own guarantee for every move
+  (recovery and maintenance moves included). This is our advice, not a Nidec statement.
 - 0x6086 = 3 gives jerk-limited moves with 0x60A4 [pp. 101, 112].
 
 ## PDO mapping
