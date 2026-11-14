@@ -35,10 +35,11 @@ runs side by side once corrupted the shared Claude Code config file.
 - `candidates.json`: the scouting set, 14 tasks asked without the skill to find where a model
   is wrong unaided. Graded by hand; verdicts in `results-scouting.md`.
 - `evals.json`: the A/B set. Six scouting tasks some model got wrong, one code task aimed at
-  the ordering errors scouting found, and, since v0.2, three tasks the skill can fail as well:
+  the ordering errors scouting found, and, since v0.2, four tasks the skill can fail as well:
   an NC axis and a PLC block both writing one drive, a rotary index table ported to a Nidec
   drive whose modulo handling differs, and one master program reviewed for a STOBER, a
-  Panasonic and a Nidec drive, with five breaks on three vendor pages. v0.2 retired
+  Panasonic and a Nidec drive, with five breaks on three vendor pages, and a drive named only
+  by its 0x1018 identity. v0.2 retired
   `pdo-two-axis` and `canopen-bringup`, and v0.3 `log-homing-to-csp-fault` and
   `units-endless-rotary-wrap`: each was right in every answer of both arms. v0.4 retired
   `log-a6bn-homing-mode-switch`, whose log let Opus deduce the cause without the skill. Each eval carries its prompt, the right answer in our own words, the traps, and a rubric
