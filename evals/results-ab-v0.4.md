@@ -91,6 +91,13 @@ not in the task. Nothing in `SKILL.md` says to identify a drive from 0x1018, and
 cannot be searched by vendor ID. The fix is filed as a bead. Each vendor's ID must come from its
 manual, so it was not guessed here.
 
+**After the fix (2026-11-14): Haiku 5.5 skill RRRRR.** SKILL.md rule 3 now says to identify an
+unnamed drive from 0x1018 first, and `vendors/README.md` has a Vendor ID column, taken from each
+vendor's manual or ESI ("not stated" for the seven documents that give none). The rerun covered
+the skill arm only, with five repetitions, the same judge, and the checks agreeing with it on all
+five. All five answers searched for 0x539 and read `yaskawa.md`. The one audit flag was a failed
+`cd` to a path that does not exist, followed by work inside the cell. Cost $0.09, judge $0.12.
+
 **The conclusion across v0.2 to v0.4:** Opus 5.5 with the skill finds and applies every fact the
 skill holds, whether the vendor is named or not, and whether the facts sit on one page or three.
 It fails only where the skill lacks the fact or the judgement. Further tasks aimed at an Opus
