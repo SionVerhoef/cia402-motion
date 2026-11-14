@@ -28,6 +28,10 @@ jobs:
       - name: vendor pages carry a read date
         run: python scripts/check_vendor_dates.py
 
+      # Every vendor page has a row in the index and in each porting table, and every row a page.
+      - name: vendor index and porting tables list every page
+        run: python scripts/check_vendor_index.py
+
       # Manuals and specs are copyrighted and must never land here (see CLAUDE.md).
       - name: no PDFs committed
         run: |

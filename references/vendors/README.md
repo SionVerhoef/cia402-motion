@@ -144,4 +144,5 @@ no published object documentation (`beckhoff.md`).
 Read the vendor's own manual or knowledge-base article. Write each deviation in your own words,
 with the document title, version, URL, section or page and the date read. Copy no passages,
 tables or figures (see the repository's `CLAUDE.md`). Name products, never customers or
-machines.
+machines. Add the page to the index table and a row to each porting table, starting with the
+vendor name as in the file name ("not read" is a fine cell); CI fails otherwise.
