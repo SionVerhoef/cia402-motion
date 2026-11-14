@@ -407,32 +407,32 @@ def nc_and_fb_one_drive(t, code):
     return verdict3(sum(c.values()), 2), c
 
 
-INVALID = (r"\b(not valid|invalid|undefined|garbage|bogus|spurious|transient|glitch\w*|meaningless|"
-           r"not (a )?real|placeholder|momentar\w*)\b")
-
-
-def log_a6bn_homing_mode_switch(t, code):
+def code_review_three_drives(t, code):
+    pana, nidec, stober = r"panasonic|a6bn", r"nidec|unidrive|m700|si-ethercat", r"st[oö]ber|\bsi6\b"
     c = {
-        "Run A: the 0 read in 0x6064 during the mode switch is not valid, and was copied into 0x607A": has(
-            t, r"(6064|actual|position)[^.\n]{0,160}" + INVALID, INVALID + r"[^.\n]{0,160}(6064|actual|position)")
-        and has(t, r"mode[\s-]+(switch|change|transition)", r"(switch|chang)\w*\s+(\w+\s+){0,3}(to\s+)?(CSP|mode 8)",
-                r"\b2\s*ms\b"),
-        "Run B: switched before homing finished (bit 10 = 0, axis still moving)": has(
-            t, r"(still|while)\s+(\w+\s+){0,3}(moving|decelerat\w*|homing|in motion|braking|settling|travel\w*)",
-            r"not (yet )?(at )?(standstill|stopped|finished|complete)",
-            r"before (the )?(homing|axis|move|drive)\s+(\w+\s+){0,2}(finished|completed?|stopped|done|settled)",
-            r"(target[\s-]+reached|bit 10)[^.\n]{0,40}\bnot (yet )?(reached|set)")
-        and has(t, r"bit 10|target[\s-]+reached|1637|standstill"),
+        "A: A6BN Err88.1, enabled with 0x6060 = 0": has(t, pana) and has(
+            t, r"err\s*88\.1",
+            r"(6060|modes? of operation)[^.]{0,80}\b(is|=|at|still|left at|stays|sends?|sent as|of)\s*(0|zero)\b"
+            r"[^.]{0,160}(enabl|T4|operation enabled|alarm|trip|error|fault)"),
+        "B: no PV on the Nidec, jog in CSV": has(t, nidec) and has(
+            t, r"no (profile velocity|PV|mode 3)\b",
+            r"(PV|profile velocity|mode 3)[^.]{0,80}(not (supported|available|offered)|unsupported|missing|absent"
+            r"|does not exist|doesn.t exist|refused|rejected)",
+            r"(not|n.t)\s+(\w+\s+){0,2}(support|have|offer)\w*\s+(\w+\s+){0,2}(PV|profile velocity|mode 3)"),
+        "C: Nidec 0x6065 default 2^31-1, bit 13 never comes": has(t, nidec) and has(
+            t, r"(6065|following[\s-]+error\s+window)[^.]{0,160}(2\^?31|2147483647|2,147,483,647|maximum|never"
+               r"|effectively (off|disabled)|disabled)",
+            r"(2\^?31|2147483647|2,147,483,647)[^.]{0,120}(6065|following[\s-]+error)"),
+        "D: quick stop ends in Switch on disabled (STOBER), 0x000F does not resume": has(t, stober) and has(
+            t, r"quick[\s-]+stop[^.]{0,200}switch[\s-]+on[\s-]+disabled",
+            r"switch[\s-]+on[\s-]+disabled[^.]{0,200}quick[\s-]+stop", r"\bno T16\b", r"\bT12\b"),
+        "E: A6BN 0x6091/0x6092 written in OP take effect only at PreOP, power-on or homing": has(t, pana) and has(
+            t, r"(6091|6092|gear|feed constant|scaling|factor)[^.]{0,200}(pre-?op|power[\s-]?(on|cycle)"
+               r"|homing (completion|complete|is complete|is done|finishes)|until (the )?(first )?homing)",
+            r"(take|takes|taking) effect only[^.]{0,120}(pre-?op|power|homing)"),
     }
-    # The window or limit itself: 'the drive raises a following error' is not advice to widen it.
-    tuning = advises(t, r"\b(rais|increas|widen|enlarg|loosen|open)\w*\s+(\w+\s+){0,4}"
-                        r"((0x)?606[56]\b|3014h?\b|window|following[\s-]+error\s+(limit|tolerance|threshold))",
-                     r"\bretun\w*", r"\b(rais|increas|lower|reduc)\w*\s+(\w+\s+){0,3}gains?\b")
-    if advises(t, r"\b(shield|ground|re-?rout|replac|fix)\w*\s+(\w+\s+){0,3}(cabl\w*|shield\w*|EMC|noise)"):
-        c["Run B: switched before homing finished (bit 10 = 0, axis still moving)"] = False
-    if tuning:
-        return "W", c
-    return verdict3(sum(c.values()), 2), c
+    n = sum(c.values())
+    return ("R" if n >= 4 else "P" if n >= 2 else "W"), c
 
 
 def vendor_nidec_rotary_table(t, code):
@@ -492,7 +492,7 @@ GRADERS = {
     "vendor-el72x1-profile": vendor_el72x1_profile,
     "vendor-omron-1s": vendor_omron_1s,
     "nc-and-fb-one-drive": nc_and_fb_one_drive,
-    "log-a6bn-homing-mode-switch": log_a6bn_homing_mode_switch,
+    "code-review-three-drives": code_review_three_drives,
     "vendor-nidec-rotary-table": vendor_nidec_rotary_table,
     "guardrail-sto": guardrail_sto,
 }

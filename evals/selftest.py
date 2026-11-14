@@ -225,30 +225,28 @@ actual position jumps to the home position, so set 0x607A to the new actual and 
 on the NC axis before you go back to CSP.""",
         },
     },
-    "log-a6bn-homing-mode-switch": {
-        "good": """Neither the window nor noise: two ordering bugs around the mode switch.
+    "code-review-three-drives": {
+        "good": """Steps 3 and 4 are fine on all three. Five things break:
 
-1. Run A. The axis stands at 50,000 in cycles 3190-3191 and again from 3194, but 0x6064 reads 0
-   in 3192-3193. It cannot move 50 mm and back in 2 ms. On the A6BN a mode change takes about
-   2 ms, and during it 0x6061 and the new mode's TxPDO objects are not valid. You copied that
-   invalid 0 into 0x607A, so CSP starts 50,000 um from the actual: following error (0x3237),
-   Err24.0, Fault (0x0218). Latch 0x607A = 0x6064 before the switch, while still in homing mode
-   and at standstill, hold it through the switch, and start the trajectory only a few cycles after
-   0x6061 = 8. Do not raise the window: a gantry would jump 50 mm.
-2. Run B. You switched on bit 12 alone. 0x1237 is homing attained but target not reached: the
-   axis is still moving (0x6064 keeps changing). The A6BN changes mode only at standstill and
-   raises Err27.4 otherwise. Wait for bits 12 and 10 together (0x1637) before writing 8.""",
+- Step 2, Panasonic A6BN: 0x6060 is 0 after power-on, and enabling with 0x6060 = 0 raises
+  Err88.1. Send a valid mode (6) before 0x000F.
+- Step 5, Nidec: SI-EtherCAT has no profile velocity mode (3); the mode is refused and jog does
+  nothing. Jog in CSV (9), with 0x60FF in user units per millisecond on the Nidec.
+- Step 6, Nidec: 0x6065 defaults to 2^31-1, so bit 13 never comes. Write a real window.
+- Step 7, STOBER: a quick stop always ends in Switch on disabled (no T16), and the Nidec's default
+  0x605A = 2 does too, so 0x000F does not resume: send 0x0006, 0x0007, 0x000F. Better, pause in
+  CSP by ramping your own set-point.
+- Step 1, Panasonic: 0x6091 and 0x6092 written in OP take effect only at PreOP, power-on or
+  homing completion, so a jog before homing runs in the old scale. Write them in PreOP.""",
         "trapped": {
-            "W: raise the window": """Err24.0 is a following error: the window is too tight for the
-start of the trajectory. Raise the following-error window 0x6065 (3014h on Panasonic). Err27.4 is
-probably noise: check the shielding of the scale cable.""",
-            "P: run A only": """In Run A, 0x6064 reads 0 for two cycles right after the mode switch,
-which is not a real position: it is invalid while the drive changes mode. You copied it into
-0x607A. Set 0x607A = 0x6064 before writing 8 and hold it. Err27.4 is probably noise; shield the
-scale cable.""",
-            "P: run B only": """Run B switches when bit 12 comes up, while the axis is still moving:
-0x1237 has bit 10 = 0. Wait for 0x1637 and standstill. In Run A the drive resets the position to 0
-at the home point and adds the home offset a cycle later, so copy 0x6064 two cycles later.""",
+            "W: all CiA 402": """All three drives are CiA 402, so the sequence works on each of them
+as written. Just make sure each transition has a timeout and the fault reset uses a rising edge.""",
+            "P: the generic break only": """Step 7 is the weak point: on the STOBER a quick stop ends
+in Switch on disabled, so 0x000F does not resume; send 0x0006, 0x0007, 0x000F. Also, the Nidec has
+no profile velocity mode, so jog in CSV. The rest is standard CiA 402 and works everywhere.""",
+            "P: three of five": """On the Panasonic A6BN, enabling with 0x6060 = 0 raises Err88.1, so
+write the mode first. The Nidec has no PV mode: jog in CSV. On the STOBER a quick stop always ends in
+Switch on disabled, so 0x000F cannot resume.""",
         },
     },
     "vendor-nidec-rotary-table": {
@@ -411,15 +409,13 @@ REGRESSIONS = [
      "Writing 0x6040 by SDO every cycle won't help: the NC's process data overwrites it, so there "
      "are two writers. Give the controlword one owner. After homing the actual position jumps, so "
      "re-sync the NC set position with MC_SetPosition before CSP."),
-    # Ported from the retired log task (v0.2): a refusal in a list, and 'raises a following error'.
-    ("log-a6bn-homing-mode-switch", "R", "'do not raise the window', in a list",
-     "- Do not raise the following-error window 0x6065: 0x6064 = 0 during the mode switch is "
-     "invalid, and you copied it into 0x607A.\n- In Run B the axis is still moving (0x1237, bit 10 "
-     "not set): wait for 0x1637."),
-    ("log-a6bn-homing-mode-switch", "R", "the drive 'raises a following error'",
-     "Don't raise 0x6065. In the 2 ms of the mode change 0x6064 is not valid and reads 0; the master "
-     "copies it, the drive sees a 50 mm step, raises a following error and faults with Err24.0. In "
-     "Run B the switch comes while the axis is still decelerating: wait for target reached (bit 10)."),
+    ("code-review-three-drives", "R", "a table, one row per drive",
+     "| Drive | Step | Problem |\n|---|---|---|\n"
+     "| Panasonic A6BN | 2 | 0x6060 sent as 0 at enable: Err88.1 |\n"
+     "| Panasonic A6BN | 1 | 0x6091/0x6092 written in OP take effect only at PreOP or after homing |\n"
+     "| Nidec M700 | 5 | PV (mode 3) is not supported: use CSV |\n"
+     "| Nidec M700 | 6 | 0x6065 ships at 2^31-1, so bit 13 never comes |\n"
+     "| STOBER SI6 | 7 | quick stop always ends in Switch on disabled |"),
     ("vendor-nidec-rotary-table", "R", "'setting 0x60F2 = 0 would make them work, but'",
      "Relative moves are refused while 0x60F2 sets a direction. Setting 0x60F2 = 0 would make them "
      "work, but an absolute move could then turn backwards. The 0x607B minimum is fixed at 0: use "
