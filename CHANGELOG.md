@@ -16,11 +16,15 @@
 - `trace`: decodes a recorded controlword/statusword log (a TwinCAT Scope CSV export or
   similar), lists each change of command, state and mode with its transition, and flags rules
   1, 2, 5, 7 and 8 of `state-machine.md`.
+  It finds the template's own `nModesDisplay` as the 0x6061 column.
 - `plan`: `--mode-change-at-standstill` and `--homing-method-at-t3`, behaviour flags for drives
   that need them (Nidec, Mitsubishi, Panasonic).
 
 **Templates**
 
+- `bench-test.md`: the protocol for the template's first run on a real drive: compile with
+  `xae_build.ps1`, the bench, twelve scenarios with the words to expect, each recording checked
+  with `cia402.py trace`, and what to record (the product, never the unit).
 - `FB_Cia402Axis`: a `bInputsValid` input, default TRUE. Wire it to WcState 0 and the slave in
   OP. While it is FALSE the FB reads nothing, changes no step and keeps every output, the
   controlword included; only `bQuickStop` still sends 0x0002. Longer than the new

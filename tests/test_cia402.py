@@ -989,6 +989,14 @@ controlword,statusword
         self.assertEqual([(s['cw'], s['sw']) for s in samples],
                          [(0x0006, 0x0250), (0x0006, 0x8250)])
 
+    def test_columns_named_as_in_the_template(self):
+        # FB_Cia402Axis's ST_Cia402Drive, recorded by Scope under its full path.
+        _, columns = cia402.read_trace([
+            'Time,MAIN.stAxis1.nControlword,MAIN.stAxis1.nStatusword,'
+            'MAIN.stAxis1.nModesOfOperation,MAIN.stAxis1.nModesDisplay', '0,6,592,8,8'])
+        self.assertEqual(columns['mode'], 'MAIN.stAxis1.nModesOfOperation')
+        self.assertEqual(columns['display'], 'MAIN.stAxis1.nModesDisplay')
+
     def test_unreadable_logs_are_errors(self):
         for lines in (['a,b', '1,2'], ['6040,6041'], ['6040,6041', '0x0006,1.5']):
             with self.subTest(lines=lines):
