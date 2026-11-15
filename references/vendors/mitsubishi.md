@@ -14,6 +14,8 @@ contradicts itself in a few places; those are marked.
 
 ## Identity and the network module
 
+- **Vendor ID 0x00000A1E, product code 0x00000201** (MR-J4-_TM_), given as the servo
+  amplifier's identity [p. 149].
 - **0x1009, 0x100A and 0x1018:04 describe the network module**, not the amplifier. The
   amplifier's own name, hardware and software versions and serial number are in Mitsubishi's
   0x2D30–0x2D33 [pp. 147, 149]. From software B3, 0x1008 returns only "MR-J4-TM"; the full model

@@ -193,3 +193,9 @@ inertia as mass [p. 14].
   [p. 221]. **Entering hm or ESM Init switches the probe off** and clears 60B9h [p. 215].
 - Status bits 1/2/9/10 toggle on each latch instead of staying set when Panasonic's 3697h
   bit 13 = 1 [pp. 219, 223]. Latch delay correction: 3709h/3792h in 25 ns [p. 224].
+
+## Identity
+
+- **Vendor ID 0x0000066F**, fixed [pp. 36, 61]. The product codes are left to the standard
+  specifications; this document gives only bits 31–28, 6 for the A6BN (5 or D for the A5BL)
+  [p. 61].

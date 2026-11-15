@@ -69,3 +69,9 @@ that relies on that breaks on drives with 0x605A = 0–4.
 
 Controlword bits 9 and 10 are reserved in every mode, so there is no change-on-set-point. Bit 15
 in PP is maxon's "endless movement" [§6.2.94].
+
+## Identity
+
+- **Vendor ID 0x000000FB** [§6.2.11, p. 6-74]. **The product code is the hardware version in the high
+  word and the application number in the low word**; the specification lists hardware versions
+  only, so it gives no complete code to match [§6.2.11, p. 6-75].

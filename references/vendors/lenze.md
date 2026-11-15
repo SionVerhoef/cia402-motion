@@ -176,3 +176,11 @@ stop too (0x5020:007) [i950-adv p. 52].
 The i700 double-axis module puts axis B at **+0x800**: 0x6840 for 0x6040, 0x1610 for 0x1600,
 and in the vendor area 0x3020 for 0x2820 [i700 pp. 27–29, 213–214]. The device has 0x6502 =
 0x382 (vl, CSP, CSV, CST) [i700 p. 217].
+
+## Identity
+
+- **Vendor ID 0x3B (59)** on EtherCAT [i700 pp. 343, 434; i950 p. 272]. The product code
+  depends on the device version; [i700 p. 434] gives 0x69070002 for one variant (double axis
+  with STO) as an example, not as the i700's code. **The i950 manual also lists vendor ID 587 and
+  product codes 950/951: those belong to the EtherNet/IP identity object, not to EtherCAT 0x1018**
+  [i950 p. 338].

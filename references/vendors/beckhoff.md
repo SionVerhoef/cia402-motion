@@ -99,6 +99,11 @@ rejected it. The reporter made the decoder read fault-first and the axis ran; no
 found. Read such a word as Fault (`../state-machine.md`). With bit 5 reserved on this terminal,
 only bits 3 and 6 carry meaning in it.
 
+### Identity
+
+- **Vendor ID 0x00000002**; product code 0x1C213052 for the EL7201 [1877760267, read
+  2026-11-14, same values in the -901x set]. The EL7211 and EL7221 codes are not on that page.
+
 ## AX8000 axis modules (AX8108, AX8118, AX8206 …)
 
 **Read 2026-11-08**: object dictionary "AX8xxx | Axis module of AX8000 system" v1.7.0

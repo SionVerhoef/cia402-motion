@@ -27,6 +27,9 @@ co32 *state machine properties* (0x2520), and 0x60C2 writes fb10, the sync inter
 
 ## Identity
 
+- **0x1018:01 vendor ID is given as "20"** for EtherCAT and CANopen, described as the
+  manufacturer ID assigned by CiA. The manual does not say whether it is decimal (0x14) or
+  hex. VARAN uses other values [p. 492].
 - **0x1018:02 product code is 0x00800000 for every F6/S6 on EtherCAT/CANopen.** The revision
   (0x1018:03) is the COMBIVIS parameter-description ID, and 0x1018:04 is the drive serial
   number [p. 492]. The product code does not tell an F6 from an S6, or one control board from

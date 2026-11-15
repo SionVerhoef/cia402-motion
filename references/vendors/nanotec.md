@@ -37,3 +37,9 @@ p. 48].
   0x6065 = 0xFFFFFFFF switches monitoring off [NP5 §6.2.2 p. 50].
 - **Manufacturer modes −1 (clock-direction) and −2 (auto setup).** The mode can be changed at any
   time [NP5 §6.2.1 p. 47, p. 249].
+
+## Identity
+
+- **Vendor ID 0x0000026C** [NP5 §1018h; CL3 object 0x1018]. Product codes: NP5-20 EtherCAT
+  0x00000025 [NP5 §1018h]; CL3-E-1-0F 0x0000000D, CL3-E-2-0F 0x0000000E [CL3 object 0x1018]. The
+  CL3-E is a CANopen/USB drive, so its 0x1018 is read over CANopen.
