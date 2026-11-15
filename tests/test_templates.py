@@ -66,7 +66,9 @@ ERR = {'not_ready': 0x8101, 'shutdown': 0x8102, 'switch_on': 0x8103, 'enable': 0
 # Short timeouts keep the scenarios to a few hundred scans.
 FAST = {'tStateTimeout': Time(200), 'tStopTimeout': Time(500), 'tHomingTimeout': Time(1000),
         'tResetPause': Time(100), 'tStandstill': Time(50), 'nResetAttempts': 3,
-        'nStandstillWindow': 0}
+        'nStandstillWindow': 0, 'bEnableAfterReset': True}
+# The suite runs with bEnableAfterReset TRUE, re-enabling after bReset as MC_Power does, so
+# that a reset scenario can end in bValid. RestartAfterError covers the default, FALSE.
 
 # Which set-point each mode follows.
 POSITION, VELOCITY, TORQUE = (1, 8), (3, 9), (4, 10, 11)
@@ -2107,10 +2109,90 @@ class Interpreter(unittest.TestCase):
 
 # One edit per rule, each breaking it in the template's text, and the scenario that
 # must then fail. The edit must match the template exactly once.
+class RestartAfterError(TemplateCase):
+    """The default, bEnableAfterReset FALSE: after an error the FB enables again only once
+    bEnable has been FALSE with the error cleared. A reset never starts the axis."""
+
+    HOLD = {'bEnableAfterReset': False}
+
+    def faulted(self, lag=0):
+        rig = self.running(lag=lag, config=self.HOLD)
+        rig.drive.fault()
+        rig.error(ERR['drive_fault'])
+        rig.run(10)
+        return rig
+
+    def assert_held(self, rig):
+        rig.run(100)
+        self.assertEqual(rig.drive.state, SOD)
+        self.assertFalse(rig.out['bValid'] or rig.out['bBusy'] or rig.out['bError'])
+        self.assertEqual(rig.words[-1], 0x0000)
+
+    def toggle_enable(self, rig):
+        rig.enable = False
+        rig.scan()
+        rig.enable = True
+
+    def test_reset_alone_does_not_enable(self):
+        for lag in (0, 3):
+            with self.subTest(lag=lag):
+                rig = self.faulted(lag)
+                mark = len(rig.words)
+                rig.pulse_reset()
+                self.assert_held(rig)
+                self.assertEqual(rig.distinct_words(mark), [0x0000, 0x0080, 0x0000])
+                self.toggle_enable(rig)
+                rig.valid()
+
+    def test_enable_toggled_during_the_error_does_not_count(self):
+        rig = self.faulted()
+        rig.enable = False
+        rig.run(5)
+        rig.enable = True
+        rig.run(5)
+        rig.pulse_reset()
+        self.assert_held(rig)
+        self.toggle_enable(rig)
+        rig.valid()
+
+    def test_enable_low_through_the_reset_then_raised(self):
+        rig = self.faulted()
+        rig.enable = False
+        rig.pulse_reset()
+        rig.at_rest()
+        rig.enable = True
+        rig.valid()
+
+    def test_an_error_without_a_fault_holds_too(self):
+        rig = self.running(config=self.HOLD)
+        rig.drive.drop(SOD)
+        rig.error(ERR['left_state'])
+        rig.pulse_reset()
+        self.assert_held(rig)
+        self.toggle_enable(rig)
+        rig.valid()
+
+    def test_the_flag_re_enables_as_mc_power(self):
+        rig = self.running(config={'bEnableAfterReset': True})
+        rig.drive.fault()
+        rig.error(ERR['drive_fault'])
+        rig.pulse_reset()
+        rig.valid()
+
+
 BROKEN_RULES = {
+    'a reset re-enables with bEnable still TRUE': (
+        'bEnableNow := bEnable AND NOT bRestartHeld;',
+        'bEnableNow := bEnable;',
+        RestartAfterError, 'test_reset_alone_does_not_enable'),
+    'a bEnable toggled during the error releases the hold': (
+        'IF (eStep = E_Cia402Step.Error) AND NOT stConfig.bEnableAfterReset THEN',
+        'IF (eStep = E_Cia402Step.Error) AND bStepEntered\n'
+        '       AND NOT stConfig.bEnableAfterReset THEN',
+        RestartAfterError, 'test_enable_toggled_during_the_error_does_not_count'),
     'restart on a Switch on disabled older than T2 or T3': (
-        'ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut\n',
-        'ELSIF bEnable AND NOT bDriveMoved\n',
+        'ELSIF bEnableNow AND NOT bDriveMoved AND NOT bUpWordOut\n',
+        'ELSIF bEnableNow AND NOT bDriveMoved\n',
         Enabling, 'test_enable_that_bounces_on_the_way_up'),
     'one bad word cuts the reset edge short': (
         'IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)\n',
@@ -2171,9 +2253,9 @@ BROKEN_RULES = {
         'ELSIF bAtRest THEN',
         CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
     'busy while held down': (
-        '              AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop))\n'
+        '              AND ((bEnableNow AND (eStep <> E_Cia402Step.QuickStop))\n'
         '                   OR NOT bAtRest);',
-        '              AND (bEnable OR NOT bAtRest);',
+        '              AND (bEnableNow OR NOT bAtRest);',
         CommandedQuickStop, 'test_line_stop_restarts_only_once_the_line_is_ok_and_run_is_set_again'),
     'quick stop not sent to an enabled drive in Error': (
         '                    IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)\n',
@@ -2372,8 +2454,8 @@ BROKEN_RULES = {
         'bAtRest := TRUE\n               AND ((eDriveState',
         BadStatusword, 'test_in_a_quick_stop_longer_than_tstatetimeout'),
     'one scan of at rest starts T2': (
-        'ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut\n',
-        'ELSIF bEnable AND NOT bUpWordOut\n',
+        'ELSIF bEnableNow AND NOT bDriveMoved AND NOT bUpWordOut\n',
+        'ELSIF bEnableNow AND NOT bUpWordOut\n',
         BadStatusword, 'test_enable_raised_on_the_scan'),
     'one scan of at rest releases a quick stop': (
         'bAtRest := NOT bDriveMoved\n               AND ((eDriveState',

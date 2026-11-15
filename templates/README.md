@@ -53,7 +53,7 @@ changed.
 |---|---|---|
 | `bEnable` | BOOL in | TRUE: Operation enabled in `nMode`. FALSE: stop with T5 (0x605C decides how), then T10 |
 | `nMode` | SINT in | The 0x6060 code. 6 means home: `bValid` then says homed. Change it at standstill |
-| `bReset` | BOOL in | Rising edge: clear the error; from Fault, run the reset first |
+| `bReset` | BOOL in | Rising edge: clear the error; from Fault, run the reset first. It does not enable: see *Errors* |
 | `bQuickStop` | BOOL in | TRUE, one scan is enough: quick stop, 0x0002 held, over `bEnable`. See *Quick stop*. Not a safety function |
 | `bInputsValid` | BOOL in, default TRUE | FALSE: the inputs are not the drive's. See *Inputs that are not the drive's* |
 | `stConfig` | `ST_Cia402Config` in | The defaults are in the type. Not checked: a zero timeout times out at once |
@@ -73,8 +73,11 @@ FB leaves them as you left them, so it never steps a set-point the drive is foll
 switch makes the new mode's own set-point safe a scan before it writes 0x6060.
 
 **Errors.** An error takes the drive down the way `bEnable` FALSE does, and the FB stays down
-until `bReset`. With `bEnable` still TRUE it then enables again, as PLCopen `MC_Power` does after
-`MC_Reset`. `nErrorID` keeps the first error; `eDriveState` shows Fault if the drive faulted
+until `bReset`. **A reset does not start the axis**: the FB enables again only once `bEnable`
+has been FALSE after the error was cleared, and a `bEnable` that fell and rose during the error
+does not count. While it waits with `bEnable` TRUE, `bValid`, `bBusy` and `bError` are all FALSE.
+Set `stConfig.bEnableAfterReset` to have it enable again with `bEnable` still TRUE, as PLCopen
+`MC_Power` does after `MC_Reset`. `nErrorID` keeps the first error; `eDriveState` shows Fault if the drive faulted
 since. In Error the FB keeps taking the drive down without a timeout of its own, and `bBusy` is
 FALSE: watch `eDriveState`.
 
@@ -319,6 +322,8 @@ compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. 
   pulse, at every scan of the way up, of the way down and of a fault reset;
 - fault resets that work, ones that fail three times, a level `bReset`, an acknowledge given in
   Fault reaction active, and a drive that leaves Fault by itself before or between the attempts;
+- a reset with `bEnable` held TRUE, which does not start the axis, also when `bEnable` fell and
+  rose during the error, and `stConfig.bEnableAfterReset`, which does;
 - fault resets that cannot end: a drive that stays in Fault reaction active, and a statusword that
   changes state on every scan, with and without a quick stop, and the longest attempt that is
   not one of these;

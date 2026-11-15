@@ -35,7 +35,10 @@
                     as cia402.py plan <state> sod, but T10 and T7 can go
                     out as 0x0002: see WHAT IT KEEPS TO.
     bReset          Rising edge: clear the error. If the drive is in
-                    Fault, reset it first: bit 7 low, high, low.
+                    Fault, reset it first: bit 7 low, high, low. It does
+                    not enable: after an error, bEnable must be FALSE once
+                    before the FB enables again (stConfig.bEnableAfterReset
+                    TRUE: it enables again with bEnable still TRUE).
     bQuickStop      TRUE: quick stop, from any step and over bEnable:
                     0x0002 held (T11: 0x605A decides how the motor stops).
                     One scan is enough. Not an error, and not a safety
@@ -55,8 +58,10 @@
     Enabling always starts from Switch on disabled: a drive found anywhere
     else is taken down first, never taken over as it is. An error takes
     the drive down as bEnable FALSE does, and the FB stays down until
-    bReset. If bEnable is still TRUE it then enables again, as PLCopen
-    MC_Power does after MC_Reset, unless a quick stop holds it down.
+    bReset. It then stays down until bEnable has been FALSE, so that a
+    reset never starts the axis. With stConfig.bEnableAfterReset it enables
+    again while bEnable is still TRUE, as PLCopen MC_Power does after
+    MC_Reset, unless a quick stop holds it down.
     nErrorID keeps the first error.
 
     WHAT IT KEEPS TO (the skill's references/state-machine.md)
@@ -154,6 +159,8 @@ VAR
     bDriveSeen       : BOOL;      // the drive has left Not ready
     bAtRest          : BOOL;      // at rest, for a second scan
     bQuickStopHeld   : BOOL;      // asked for, not yet released
+    bRestartHeld     : BOOL;      // an error: no enabling until bEnable FALSE
+    bEnableNow       : BOOL;      // bEnable, unless an error holds it off
     bMoving          : BOOL;      // position left the standstill band
     nStandstillRef   : DINT;
     bHomingRunSeen   : BOOL;      // bits 12, 13 both 0 since bit 4
@@ -275,6 +282,16 @@ ELSE
         bResetRequest := TRUE;
     END_IF
 
+    // After an error the axis enables again only on a bEnable that was FALSE
+    // once the error had been cleared: a reset must not start it. A bEnable
+    // that falls and rises during the error does not count.
+    IF (eStep = E_Cia402Step.Error) AND NOT stConfig.bEnableAfterReset THEN
+        bRestartHeld := TRUE;
+    ELSIF NOT bEnable OR stConfig.bEnableAfterReset THEN
+        bRestartHeld := FALSE;
+    END_IF
+    bEnableNow := bEnable AND NOT bRestartHeld;
+
     // The timeout of the step the FB is in. IN low on the scan the step or
     // the drive's state changed re-arms it, so every transition gets a full
     // timeout of its own.
@@ -388,14 +405,14 @@ ELSE
             // On the way down (outputs below). Enabling starts only from
             // Switch on disabled, where no command of the way down can still
             // be on its way.
-            IF bEnable AND nMode = 0 THEN
+            IF bEnableNow AND nMode = 0 THEN
                 nErrorID := cErrNoMode;
                 eStep    := E_Cia402Step.Error;
-            ELSIF bEnable
+            ELSIF bEnableNow
                   AND eDriveState = E_Cia402State.NotReadyToSwitchOn
             THEN
                 eStep := E_Cia402Step.WaitReady;
-            ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut
+            ELSIF bEnableNow AND NOT bDriveMoved AND NOT bUpWordOut
                   AND eDriveState = E_Cia402State.SwitchOnDisabled
             THEN
                 eStep := E_Cia402Step.Shutdown;
@@ -798,7 +815,7 @@ ELSE
     bValid := (eStep = E_Cia402Step.Running);
     bError := (eStep = E_Cia402Step.Error);
     bBusy  := NOT bValid AND NOT bError
-              AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop))
+              AND ((bEnableNow AND (eStep <> E_Cia402Step.QuickStop))
                    OR NOT bAtRest);
 END_IF
 ]]></ST>

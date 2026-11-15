@@ -25,6 +25,10 @@
   OP. While it is FALSE the FB reads nothing, changes no step and keeps every output, the
   controlword included; only `bQuickStop` still sends 0x0002. Longer than the new
   `stConfig.tInputsInvalid` (default T#100MS) is the new error 16#8116. The FB now has 12 pins.
+- `FB_Cia402Axis`: **a reset no longer starts the axis.** After an error the FB enables again
+  only once `bEnable` has been FALSE with the error cleared. `stConfig.bEnableAfterReset` TRUE
+  restores the old behaviour, which re-enabled with `bEnable` still TRUE as `MC_Power` does after
+  `MC_Reset`. Callers that relied on it must set the flag or drop `bEnable` after a reset.
 - Fixed a homing error found only after `tHomingTimeout`. A drive that refused the method, with
   bit 13 left from an earlier run, never showed the run in progress, so the error was ignored
   as stale. Bit 13 still set `tStateTimeout` after bit 4 went out is now 16#8114.
