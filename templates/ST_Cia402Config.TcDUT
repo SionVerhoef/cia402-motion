@@ -12,6 +12,7 @@ STRUCT
     nStandstillWindow : DINT := 0;        // position band, 0x6064 units
     tStandstill       : TIME := T#100MS;  // in the band this long: stopped
     tInputsInvalid    : TIME := T#100MS;  // bInputsValid FALSE this long: error
+    bEnableAfterReset : BOOL := FALSE;    // TRUE: re-enable after bReset, as MC_Power
 END_STRUCT
 END_TYPE
 ]]></Declaration>
