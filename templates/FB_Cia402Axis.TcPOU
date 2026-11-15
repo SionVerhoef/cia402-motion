@@ -47,6 +47,10 @@
                     an error or a fault reset too, so that nothing
                     restarts it but a new bEnable. A drive that does not
                     take 0x0002 in tStateTimeout: 16#8108, and T5.
+    bInputsValid    FALSE: this cycle's inputs are not the drive's (WcState,
+                    the slave not in OP). Nothing is read and no step
+                    changes; the outputs are held, but for bQuickStop.
+                    Longer than tInputsInvalid: 16#8116. Default TRUE.
 
     Enabling always starts from Switch on disabled: a drive found anywhere
     else is taken down first, never taken over as it is. An error takes
@@ -109,14 +113,17 @@
     - A homing result counts only after the drive has shown a phase with
       bits 12 and 13 both 0, from the scan bit 4 goes out on, so that an
       earlier run's result is not taken for this one. A drive that never
-      shows one (an instant method 35 or 37 run twice) times out.
+      shows one (an instant method 35 or 37 run twice) times out. Bit 13
+      still set tStateTimeout after bit 4 went out is a homing error: a
+      drive that refuses the method.
 *)
 VAR_INPUT
-    bEnable    : BOOL;            // TRUE: run in nMode; FALSE: stop, off
-    nMode      : SINT;            // 0x6060 code: 8 CSP, 1 PP, 6 homing...
-    bReset     : BOOL;            // rising edge: clear, reset a fault
-    bQuickStop : BOOL;            // TRUE: T11, held. Not a safety stop
-    stConfig   : ST_Cia402Config; // timeouts, reset retries, standstill
+    bEnable      : BOOL;            // TRUE: run in nMode; FALSE: stop, off
+    nMode        : SINT;            // 0x6060 code: 8 CSP, 1 PP, 6 homing...
+    bReset       : BOOL;            // rising edge: clear, reset a fault
+    bQuickStop   : BOOL;            // TRUE: T11, held. Not a safety stop
+    bInputsValid : BOOL := TRUE;    // FALSE: the inputs are not the drive's
+    stConfig     : ST_Cia402Config; // timeouts, reset retries, standstill
 END_VAR
 VAR_OUTPUT
     bValid      : BOOL;           // in nMode: the set-points are yours
@@ -139,6 +146,8 @@ VAR
     fbEnableWordOff  : TON;       // no 0x000F can still be on its way
     fbResetLimit     : TON;       // one attempt of a fault reset, at most
     fbUpWordOut      : TON;       // T2 or T3 can no longer come
+    fbInputsInvalid  : TON;       // bInputsValid FALSE too long
+    fbHomingStart    : TON;       // bit 4 out long enough to be taken
     tStepLimit       : TIME;
     bStepEntered     : BOOL;      // first scan in a new step
     bDriveMoved      : BOOL;      // the decoded state changed this scan
@@ -173,588 +182,625 @@ VAR CONSTANT
     cErrLeftState   : UDINT := 16#8113;  // drive moved where not asked
     cErrHoming      : UDINT := 16#8114;  // homing error, bit 13
     cErrStatusword  : UDINT := 16#8115;  // 0x6041 decodes to no state
+    cErrInputs      : UDINT := 16#8116;  // bInputsValid FALSE too long
     cErrNoMode      : UDINT := 16#8120;  // nMode = 0
     cErrInvalidStep : UDINT := 16#8FFF;
 END_VAR
 ]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 1. Decode 0x6041. Each state has its own mask: bit 5 belongs to four of
-//    them and is a don't-care in the other four. A word that matches none
-//    is read fault-first, as cia402.py decode sw does.
-IF (stDrive.nStatusword AND 16#004F) = 16#0000 THEN
-    eDriveState := E_Cia402State.NotReadyToSwitchOn;
-ELSIF (stDrive.nStatusword AND 16#004F) = 16#0040 THEN
-    eDriveState := E_Cia402State.SwitchOnDisabled;
-ELSIF (stDrive.nStatusword AND 16#006F) = 16#0021 THEN
-    eDriveState := E_Cia402State.ReadyToSwitchOn;
-ELSIF (stDrive.nStatusword AND 16#006F) = 16#0023 THEN
-    eDriveState := E_Cia402State.SwitchedOn;
-ELSIF (stDrive.nStatusword AND 16#006F) = 16#0027 THEN
-    eDriveState := E_Cia402State.OperationEnabled;
-ELSIF (stDrive.nStatusword AND 16#006F) = 16#0007 THEN
-    eDriveState := E_Cia402State.QuickStopActive;
-ELSIF (stDrive.nStatusword AND 16#0008) = 0 THEN
-    eDriveState := E_Cia402State.Unknown;
-ELSIF (stDrive.nStatusword AND 16#0007) = 16#0007 THEN
-    eDriveState := E_Cia402State.FaultReactionActive;
-ELSE
-    eDriveState := E_Cia402State.Fault;
-END_IF
-
-// A drive never goes back to Not ready to switch on. Seen after another
-// state, that word means the inputs are not the drive's: a bus restart, a
-// copy that never happened. 0x0000 sent then could be T9.
-IF (eDriveState <> E_Cia402State.NotReadyToSwitchOn)
-   AND (eDriveState <> E_Cia402State.Unknown)
-THEN
-    bDriveSeen := TRUE;
-ELSIF bDriveSeen AND (eDriveState = E_Cia402State.NotReadyToSwitchOn) THEN
-    eDriveState := E_Cia402State.Unknown;
-END_IF
-
-// 2. Every block that carries state is called here, once per scan, above
-//    the state machine that reads it.
-fbResetTrig(CLK := bReset);
-
-bStepEntered := (eStep <> eStepPrev);
-bDriveMoved  := (eDriveState <> eDrivePrev);
-eStepPrev    := eStep;
-eDrivePrev   := eDriveState;
-
-// At rest only from the second scan: one bad word is no reason to send
-// 0x0000, or to let a quick stop go.
-bAtRest := NOT bDriveMoved
-           AND ((eDriveState = E_Cia402State.SwitchOnDisabled)
-                OR (eDriveState = E_Cia402State.NotReadyToSwitchOn));
-
-bResetting := (eStep = E_Cia402Step.ResetLow)
-              OR (eStep = E_Cia402Step.ResetEdge)
-              OR (eStep = E_Cia402Step.ResetRelease)
-              OR (eStep = E_Cia402Step.ResetPause);
-
-// A reset asked for in Error is kept until it can be acted on, so that an
-// edge in Fault reaction active is not lost.
-IF eStep <> E_Cia402Step.Error THEN
-    bResetRequest := FALSE;
-ELSIF fbResetTrig.Q THEN
-    bResetRequest := TRUE;
-END_IF
-
-// The timeout of the step the FB is in. IN low on the scan the step or
-// the drive's state changed re-arms it, so every transition gets a full
-// timeout of its own.
-CASE eStep OF
-    E_Cia402Step.Homing:
-        tStepLimit := stConfig.tHomingTimeout;
-    E_Cia402Step.Disabled, E_Cia402Step.Error:
-        tStepLimit := stConfig.tStopTimeout;
-    E_Cia402Step.ResetLow, E_Cia402Step.ResetRelease:
-        tStepLimit := cResetSettle;
-    E_Cia402Step.ResetPause:
-        tStepLimit := stConfig.tResetPause;
-ELSE
-    tStepLimit := stConfig.tStateTimeout;
-END_CASE
-fbStepTimer(IN := NOT (bStepEntered OR bDriveMoved), PT := tStepLimit);
-
-// Standstill, for leaving Quick stop active where 0x605A keeps the drive
-// there: the position has stayed inside the band for tStandstill. It
-// measures the motor, not the time since the stop began.
-bMoving := ABS(stDrive.nPositionActual - nStandstillRef)
-           > stConfig.nStandstillWindow;
-IF bMoving THEN
-    nStandstillRef := stDrive.nPositionActual;
-END_IF
-fbStandstill(IN := stConfig.bQuickStopStays
-                   AND (eDriveState = E_Cia402State.QuickStopActive)
-                   AND NOT bMoving,
-             PT := stConfig.tStandstill);
-
-// A quick stop is kept, through an error or a fault reset too, until the
-// drive is down with bQuickStop and bEnable both FALSE: only a new bEnable
-// restarts the axis. The timer gives the drive tStateTimeout to take 0x0002.
-// It never runs in Quick stop active: that state is the stop ramp. Nor in a
-// fault reset: 0x0002 has not gone out yet.
-IF bQuickStop THEN
-    bQuickStopHeld := TRUE;
-ELSIF bAtRest AND NOT bEnable THEN
-    bQuickStopHeld := FALSE;
-END_IF
-fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest
-                       AND (eDriveState <> E_Cia402State.QuickStopActive)
-                       AND NOT bResetting,
-                 PT := stConfig.tStateTimeout);
-
-// How long the FB's own words have been without bit 3. It reads no state: a
-// statusword that flips between two states must not re-arm it.
-fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,
-                PT := stConfig.tStateTimeout);
-
-// A fault reset ends, whatever the drive shows: fbStepTimer waits out Fault
-// reaction active with no limit, and a state change re-arms it. This limit is
-// re-armed only by the attempt counted on the way into ResetPause, and the
-// attempts run out. It allows one attempt whole, with its pause, and a fault
-// reaction as long as a stop; the second tStateTimeout is for the scans each
-// step loses, and the statusword's lag.
-fbResetLimit(IN := bResetting
-                   AND NOT (bStepEntered AND (eStep = E_Cia402Step.ResetPause)),
-             PT := stConfig.tResetPause + stConfig.tStateTimeout
-                   + stConfig.tStateTimeout + stConfig.tStopTimeout);
-
-// A 0x0006 or 0x0007 left behind when bEnable fell has been taken, or
-// ignored, once the drive shows a new state, or after tStateTimeout. Until
-// then the Switch on disabled the FB sees may be older than that word.
-fbUpWordOut(IN := bUpWordOut, PT := stConfig.tStateTimeout);
-IF bDriveMoved OR fbUpWordOut.Q THEN
-    bUpWordOut := FALSE;
-END_IF
-
-// Homing, statusword bits 13, 12, 10. Bits 12 and 13 both 0 (in progress,
-// or not started) cannot be left over from an earlier run. Outside homing
-// this follows the latest phase; in it, it latches.
-IF (stDrive.nStatusword AND 16#3000) = 0 THEN
-    bHomingRunSeen := TRUE;
-ELSIF eStep <> E_Cia402Step.Homing THEN
-    bHomingRunSeen := FALSE;
-END_IF
-
-// 3. A statusword that decodes to no state is an error in every step; a
-//    fault is one in every step but the reset itself. A quick stop takes
-//    over from every step but Error and the reset, which ends first.
-IF eStep <> E_Cia402Step.Error THEN
-    IF eDriveState = E_Cia402State.Unknown THEN
-        nErrorID := cErrStatusword;
-        eStep    := E_Cia402Step.Error;
-    ELSIF NOT bResetting
-          AND ((eDriveState = E_Cia402State.Fault)
-               OR (eDriveState = E_Cia402State.FaultReactionActive))
-    THEN
-        nErrorID := cErrDriveFault;
-        eStep    := E_Cia402Step.Error;
-    ELSIF bResetting AND fbResetLimit.Q THEN
-        nErrorID := cErrResetTime;
-        eStep    := E_Cia402Step.Error;
-    ELSIF bQuickStopHeld AND NOT bResetting THEN
-        eStep := E_Cia402Step.QuickStop;
+      <ST><![CDATA[// 0. bInputsValid FALSE: the inputs may not be the drive's (EtherCAT
+//    WcState not 0 or the slave not in OP, a CANopen PDO not received).
+//    Nothing is read from them and no step changes: every output stays as
+//    the last scan left it, 0x6040 included, but for a quick stop asked
+//    for, which sends 0x0002. The timers run on, so a step judged on the
+//    first valid scan has had the time that passed. Longer than
+//    tInputsInvalid is an error, and the last word still goes out until
+//    the inputs are valid again: the drive's own reaction to a lost bus
+//    (0x6007) is what stops it then.
+fbInputsInvalid(IN := NOT bInputsValid, PT := stConfig.tInputsInvalid);
+IF NOT bInputsValid THEN
+    IF bQuickStop THEN
+        bQuickStopHeld := TRUE;
     END_IF
-END_IF
+    IF bQuickStopHeld AND NOT bResetting AND NOT fbQuickStopTimer.Q THEN
+        stDrive.nControlword := 16#0002;
+    END_IF
+    IF fbInputsInvalid.Q AND (eStep <> E_Cia402Step.Error) THEN
+        nErrorID := cErrInputs;
+        eStep    := E_Cia402Step.Error;
+    END_IF
+    bValid := (eStep = E_Cia402Step.Running) AND NOT bQuickStopHeld;
+    bError := (eStep = E_Cia402Step.Error);
+    bBusy  := bBusy AND NOT bError;
+ELSE
+    // 1. Decode 0x6041. Each state has its own mask: bit 5 belongs to four of
+    //    them and is a don't-care in the other four. A word that matches none
+    //    is read fault-first, as cia402.py decode sw does.
+    IF (stDrive.nStatusword AND 16#004F) = 16#0000 THEN
+        eDriveState := E_Cia402State.NotReadyToSwitchOn;
+    ELSIF (stDrive.nStatusword AND 16#004F) = 16#0040 THEN
+        eDriveState := E_Cia402State.SwitchOnDisabled;
+    ELSIF (stDrive.nStatusword AND 16#006F) = 16#0021 THEN
+        eDriveState := E_Cia402State.ReadyToSwitchOn;
+    ELSIF (stDrive.nStatusword AND 16#006F) = 16#0023 THEN
+        eDriveState := E_Cia402State.SwitchedOn;
+    ELSIF (stDrive.nStatusword AND 16#006F) = 16#0027 THEN
+        eDriveState := E_Cia402State.OperationEnabled;
+    ELSIF (stDrive.nStatusword AND 16#006F) = 16#0007 THEN
+        eDriveState := E_Cia402State.QuickStopActive;
+    ELSIF (stDrive.nStatusword AND 16#0008) = 0 THEN
+        eDriveState := E_Cia402State.Unknown;
+    ELSIF (stDrive.nStatusword AND 16#0007) = 16#0007 THEN
+        eDriveState := E_Cia402State.FaultReactionActive;
+    ELSE
+        eDriveState := E_Cia402State.Fault;
+    END_IF
 
-// 4. Transitions. Each step names the state it waits for and the state it
-//    may still be in; anything else, or its timeout, is an error.
-CASE eStep OF
+    // A drive never goes back to Not ready to switch on. Seen after another
+    // state, that word means the inputs are not the drive's: a bus restart, a
+    // copy that never happened. 0x0000 sent then could be T9.
+    IF (eDriveState <> E_Cia402State.NotReadyToSwitchOn)
+       AND (eDriveState <> E_Cia402State.Unknown)
+    THEN
+        bDriveSeen := TRUE;
+    ELSIF bDriveSeen AND (eDriveState = E_Cia402State.NotReadyToSwitchOn) THEN
+        eDriveState := E_Cia402State.Unknown;
+    END_IF
 
-    E_Cia402Step.Disabled:
-        // On the way down (outputs below). Enabling starts only from
-        // Switch on disabled, where no command of the way down can still
-        // be on its way.
-        IF bEnable AND nMode = 0 THEN
-            nErrorID := cErrNoMode;
+    // 2. Every block that carries state is called here, once per scan, above
+    //    the state machine that reads it.
+    fbResetTrig(CLK := bReset);
+
+    bStepEntered := (eStep <> eStepPrev);
+    bDriveMoved  := (eDriveState <> eDrivePrev);
+    eStepPrev    := eStep;
+    eDrivePrev   := eDriveState;
+
+    // At rest only from the second scan: one bad word is no reason to send
+    // 0x0000, or to let a quick stop go.
+    bAtRest := NOT bDriveMoved
+               AND ((eDriveState = E_Cia402State.SwitchOnDisabled)
+                    OR (eDriveState = E_Cia402State.NotReadyToSwitchOn));
+
+    bResetting := (eStep = E_Cia402Step.ResetLow)
+                  OR (eStep = E_Cia402Step.ResetEdge)
+                  OR (eStep = E_Cia402Step.ResetRelease)
+                  OR (eStep = E_Cia402Step.ResetPause);
+
+    // A reset asked for in Error is kept until it can be acted on, so that an
+    // edge in Fault reaction active is not lost.
+    IF eStep <> E_Cia402Step.Error THEN
+        bResetRequest := FALSE;
+    ELSIF fbResetTrig.Q THEN
+        bResetRequest := TRUE;
+    END_IF
+
+    // The timeout of the step the FB is in. IN low on the scan the step or
+    // the drive's state changed re-arms it, so every transition gets a full
+    // timeout of its own.
+    CASE eStep OF
+        E_Cia402Step.Homing:
+            tStepLimit := stConfig.tHomingTimeout;
+        E_Cia402Step.Disabled, E_Cia402Step.Error:
+            tStepLimit := stConfig.tStopTimeout;
+        E_Cia402Step.ResetLow, E_Cia402Step.ResetRelease:
+            tStepLimit := cResetSettle;
+        E_Cia402Step.ResetPause:
+            tStepLimit := stConfig.tResetPause;
+    ELSE
+        tStepLimit := stConfig.tStateTimeout;
+    END_CASE
+    fbStepTimer(IN := NOT (bStepEntered OR bDriveMoved), PT := tStepLimit);
+
+    // Standstill, for leaving Quick stop active where 0x605A keeps the drive
+    // there: the position has stayed inside the band for tStandstill. It
+    // measures the motor, not the time since the stop began.
+    bMoving := ABS(stDrive.nPositionActual - nStandstillRef)
+               > stConfig.nStandstillWindow;
+    IF bMoving THEN
+        nStandstillRef := stDrive.nPositionActual;
+    END_IF
+    fbStandstill(IN := stConfig.bQuickStopStays
+                       AND (eDriveState = E_Cia402State.QuickStopActive)
+                       AND NOT bMoving,
+                 PT := stConfig.tStandstill);
+
+    // A quick stop is kept, through an error or a fault reset too, until the
+    // drive is down with bQuickStop and bEnable both FALSE: only a new
+    // bEnable restarts the axis. The timer gives the drive tStateTimeout to
+    // take 0x0002. It never runs in Quick stop active: that state is the stop
+    // ramp. Nor in a fault reset: 0x0002 has not gone out yet.
+    IF bQuickStop THEN
+        bQuickStopHeld := TRUE;
+    ELSIF bAtRest AND NOT bEnable THEN
+        bQuickStopHeld := FALSE;
+    END_IF
+    fbQuickStopTimer(IN := bQuickStopHeld AND NOT bAtRest
+                           AND (eDriveState <> E_Cia402State.QuickStopActive)
+                           AND NOT bResetting,
+                     PT := stConfig.tStateTimeout);
+
+    // How long the FB's own words have been without bit 3. It reads no state: a
+    // statusword that flips between two states must not re-arm it.
+    fbEnableWordOff(IN := (stDrive.nControlword AND 16#0008) = 0,
+                    PT := stConfig.tStateTimeout);
+
+    // A fault reset ends, whatever the drive shows: fbStepTimer waits out
+    // Fault reaction active with no limit, and a state change re-arms it. This
+    // limit is re-armed only by the attempt counted on the way into
+    // ResetPause, and the attempts run out. It allows one attempt whole, with
+    // its pause, and a fault reaction as long as a stop; the second
+    // tStateTimeout is for the scans each step loses, and the statusword's lag.
+    fbResetLimit(IN := bResetting
+                       AND NOT (bStepEntered
+                                AND (eStep = E_Cia402Step.ResetPause)),
+                 PT := stConfig.tResetPause + stConfig.tStateTimeout
+                       + stConfig.tStateTimeout + stConfig.tStopTimeout);
+
+    // A 0x0006 or 0x0007 left behind when bEnable fell has been taken, or
+    // ignored, once the drive shows a new state, or after tStateTimeout. Until
+    // then the Switch on disabled the FB sees may be older than that word.
+    fbUpWordOut(IN := bUpWordOut, PT := stConfig.tStateTimeout);
+    IF bDriveMoved OR fbUpWordOut.Q THEN
+        bUpWordOut := FALSE;
+    END_IF
+
+    // Homing, statusword bits 13, 12, 10. Bits 12 and 13 both 0 (in progress,
+    // or not started) cannot be left over from an earlier run. Outside homing
+    // this follows the latest phase; in it, it latches. A drive that
+    // refuses the start sets bit 13 without such a phase, and bit 13 left
+    // from an earlier run then never clears: still there tStateTimeout after
+    // bit 4 went out, it is this run's.
+    IF (stDrive.nStatusword AND 16#3000) = 0 THEN
+        bHomingRunSeen := TRUE;
+    ELSIF eStep <> E_Cia402Step.Homing THEN
+        bHomingRunSeen := FALSE;
+    END_IF
+    fbHomingStart(IN := (eStep = E_Cia402Step.Homing),
+                  PT := stConfig.tStateTimeout);
+
+    // 3. A statusword that decodes to no state is an error in every step; a
+    //    fault is one in every step but the reset itself. A quick stop takes
+    //    over from every step but Error and the reset, which ends first.
+    IF eStep <> E_Cia402Step.Error THEN
+        IF eDriveState = E_Cia402State.Unknown THEN
+            nErrorID := cErrStatusword;
             eStep    := E_Cia402Step.Error;
-        ELSIF bEnable
-              AND eDriveState = E_Cia402State.NotReadyToSwitchOn
+        ELSIF NOT bResetting
+              AND ((eDriveState = E_Cia402State.Fault)
+                   OR (eDriveState = E_Cia402State.FaultReactionActive))
         THEN
-            eStep := E_Cia402Step.WaitReady;
-        ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut
-              AND eDriveState = E_Cia402State.SwitchOnDisabled
-        THEN
-            eStep := E_Cia402Step.Shutdown;
-        ELSIF fbStepTimer.Q
-              AND ((eDriveState = E_Cia402State.OperationEnabled)
-                   OR (eDriveState = E_Cia402State.SwitchedOn)
-                   OR (eDriveState = E_Cia402State.ReadyToSwitchOn))
-        THEN
-            nErrorID := cErrStop;
+            nErrorID := cErrDriveFault;
             eStep    := E_Cia402Step.Error;
+        ELSIF bResetting AND fbResetLimit.Q THEN
+            nErrorID := cErrResetTime;
+            eStep    := E_Cia402Step.Error;
+        ELSIF bQuickStopHeld AND NOT bResetting THEN
+            eStep := E_Cia402Step.QuickStop;
         END_IF
+    END_IF
 
-    E_Cia402Step.WaitReady:
-        IF NOT bEnable THEN
-            eStep := E_Cia402Step.Disabled;
-        ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN
-            eStep := E_Cia402Step.Shutdown;
-        ELSIF eDriveState <> E_Cia402State.NotReadyToSwitchOn THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF fbStepTimer.Q THEN
-            nErrorID := cErrNotReady;
-            eStep    := E_Cia402Step.Error;
-        END_IF
+    // 4. Transitions. Each step names the state it waits for and the state it
+    //    may still be in; anything else, or its timeout, is an error.
+    CASE eStep OF
 
-    E_Cia402Step.Shutdown:
-        IF NOT bEnable THEN
-            bUpWordOut := TRUE;
-            eStep      := E_Cia402Step.Disabled;
-        ELSIF eDriveState = E_Cia402State.ReadyToSwitchOn THEN
-            eStep := E_Cia402Step.SwitchOn;
-        ELSIF eDriveState <> E_Cia402State.SwitchOnDisabled THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF fbStepTimer.Q THEN
-            nErrorID := cErrShutdown;
-            eStep    := E_Cia402Step.Error;
-        END_IF
-
-    E_Cia402Step.SwitchOn:
-        IF NOT bEnable THEN
-            bUpWordOut := TRUE;
-            eStep      := E_Cia402Step.Disabled;
-        ELSIF eDriveState = E_Cia402State.SwitchedOn THEN
-            eStep := E_Cia402Step.SetMode;
-        ELSIF eDriveState <> E_Cia402State.ReadyToSwitchOn THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF fbStepTimer.Q THEN
-            nErrorID := cErrSwitchOn;
-            eStep    := E_Cia402Step.Error;
-        END_IF
-
-    E_Cia402Step.SetMode:
-        // In Switched on on the way up, in Operation enabled when the mode
-        // changes while running; the drive must stay where it was. Done
-        // once 0x6060 has gone out as nMode and 0x6061 shows it.
-        IF NOT bEnable THEN
-            eStep := E_Cia402Step.Disabled;
-        ELSIF nMode = 0 THEN
-            nErrorID := cErrNoMode;
-            eStep    := E_Cia402Step.Error;
-        ELSIF eDriveState = E_Cia402State.QuickStopActive THEN
-            nErrorID := cErrQuickStop;
-            eStep    := E_Cia402Step.Error;
-        ELSIF bDriveMoved
-              OR ((eDriveState <> E_Cia402State.SwitchedOn)
-                  AND (eDriveState <> E_Cia402State.OperationEnabled))
-        THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF (stDrive.nModesOfOperation = nMode)
-              AND (stDrive.nModesDisplay = nMode)
-        THEN
-            IF eDriveState = E_Cia402State.SwitchedOn THEN
-                eStep := E_Cia402Step.EnableOperation;
-            ELSIF nMode = 6 THEN
-                eStep := E_Cia402Step.Homing;
-            ELSE
-                eStep := E_Cia402Step.Running;
+        E_Cia402Step.Disabled:
+            // On the way down (outputs below). Enabling starts only from
+            // Switch on disabled, where no command of the way down can still
+            // be on its way.
+            IF bEnable AND nMode = 0 THEN
+                nErrorID := cErrNoMode;
+                eStep    := E_Cia402Step.Error;
+            ELSIF bEnable
+                  AND eDriveState = E_Cia402State.NotReadyToSwitchOn
+            THEN
+                eStep := E_Cia402Step.WaitReady;
+            ELSIF bEnable AND NOT bDriveMoved AND NOT bUpWordOut
+                  AND eDriveState = E_Cia402State.SwitchOnDisabled
+            THEN
+                eStep := E_Cia402Step.Shutdown;
+            ELSIF fbStepTimer.Q
+                  AND ((eDriveState = E_Cia402State.OperationEnabled)
+                       OR (eDriveState = E_Cia402State.SwitchedOn)
+                       OR (eDriveState = E_Cia402State.ReadyToSwitchOn))
+            THEN
+                nErrorID := cErrStop;
+                eStep    := E_Cia402Step.Error;
             END_IF
-        ELSIF fbStepTimer.Q THEN
-            nErrorID := cErrMode;
-            eStep    := E_Cia402Step.Error;
-        END_IF
 
-    E_Cia402Step.EnableOperation:
-        IF eDriveState = E_Cia402State.OperationEnabled THEN
+        E_Cia402Step.WaitReady:
             IF NOT bEnable THEN
                 eStep := E_Cia402Step.Disabled;
+            ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN
+                eStep := E_Cia402Step.Shutdown;
+            ELSIF eDriveState <> E_Cia402State.NotReadyToSwitchOn THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
+            ELSIF fbStepTimer.Q THEN
+                nErrorID := cErrNotReady;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.Shutdown:
+            IF NOT bEnable THEN
+                bUpWordOut := TRUE;
+                eStep      := E_Cia402Step.Disabled;
+            ELSIF eDriveState = E_Cia402State.ReadyToSwitchOn THEN
+                eStep := E_Cia402Step.SwitchOn;
+            ELSIF eDriveState <> E_Cia402State.SwitchOnDisabled THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
+            ELSIF fbStepTimer.Q THEN
+                nErrorID := cErrShutdown;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.SwitchOn:
+            IF NOT bEnable THEN
+                bUpWordOut := TRUE;
+                eStep      := E_Cia402Step.Disabled;
+            ELSIF eDriveState = E_Cia402State.SwitchedOn THEN
+                eStep := E_Cia402Step.SetMode;
+            ELSIF eDriveState <> E_Cia402State.ReadyToSwitchOn THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
+            ELSIF fbStepTimer.Q THEN
+                nErrorID := cErrSwitchOn;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.SetMode:
+            // In Switched on on the way up, in Operation enabled when the mode
+            // changes while running; the drive must stay where it was. Done
+            // once 0x6060 has gone out as nMode and 0x6061 shows it.
+            IF NOT bEnable THEN
+                eStep := E_Cia402Step.Disabled;
+            ELSIF nMode = 0 THEN
+                nErrorID := cErrNoMode;
+                eStep    := E_Cia402Step.Error;
+            ELSIF eDriveState = E_Cia402State.QuickStopActive THEN
+                nErrorID := cErrQuickStop;
+                eStep    := E_Cia402Step.Error;
+            ELSIF bDriveMoved
+                  OR ((eDriveState <> E_Cia402State.SwitchedOn)
+                      AND (eDriveState <> E_Cia402State.OperationEnabled))
+            THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
+            ELSIF (stDrive.nModesOfOperation = nMode)
+                  AND (stDrive.nModesDisplay = nMode)
+            THEN
+                IF eDriveState = E_Cia402State.SwitchedOn THEN
+                    eStep := E_Cia402Step.EnableOperation;
+                ELSIF nMode = 6 THEN
+                    eStep := E_Cia402Step.Homing;
+                ELSE
+                    eStep := E_Cia402Step.Running;
+                END_IF
+            ELSIF fbStepTimer.Q THEN
+                nErrorID := cErrMode;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.EnableOperation:
+            IF eDriveState = E_Cia402State.OperationEnabled THEN
+                IF NOT bEnable THEN
+                    eStep := E_Cia402Step.Disabled;
+                ELSIF (nMode <> stDrive.nModesOfOperation)
+                      OR (nMode <> stDrive.nModesDisplay)
+                THEN
+                    eStep := E_Cia402Step.SetMode;
+                ELSIF nMode = 6 THEN
+                    eStep := E_Cia402Step.Homing;
+                ELSE
+                    eStep := E_Cia402Step.Running;
+                END_IF
+            ELSIF eDriveState <> E_Cia402State.SwitchedOn THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
+            ELSIF NOT bEnable THEN
+                eStep := E_Cia402Step.AbortEnable;
+            ELSIF fbStepTimer.Q THEN
+                nErrorID := cErrEnable;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.AbortEnable:
+            // 0x000F may still be on its way, and bEnable FALSE stops with T5,
+            // not T11. 0x0007 is T5 in Operation enabled and nothing in
+            // Switched on; after tStateTimeout there no T4 can still come.
+            IF (eDriveState <> E_Cia402State.SwitchedOn) OR fbStepTimer.Q THEN
+                eStep := E_Cia402Step.Disabled;
+            END_IF
+
+        E_Cia402Step.Homing:
+            // Dropping bit 4 interrupts the run: bEnable FALSE and a mode
+            // change both do that, through the outputs of the next step.
+            IF NOT bEnable THEN
+                eStep := E_Cia402Step.Disabled;
+            ELSIF eDriveState = E_Cia402State.QuickStopActive THEN
+                nErrorID := cErrQuickStop;
+                eStep    := E_Cia402Step.Error;
+            ELSIF eDriveState <> E_Cia402State.OperationEnabled THEN
+                nErrorID := cErrLeftState;
+                eStep    := E_Cia402Step.Error;
             ELSIF (nMode <> stDrive.nModesOfOperation)
                   OR (nMode <> stDrive.nModesDisplay)
             THEN
                 eStep := E_Cia402Step.SetMode;
-            ELSIF nMode = 6 THEN
-                eStep := E_Cia402Step.Homing;
-            ELSE
-                eStep := E_Cia402Step.Running;
-            END_IF
-        ELSIF eDriveState <> E_Cia402State.SwitchedOn THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF NOT bEnable THEN
-            eStep := E_Cia402Step.AbortEnable;
-        ELSIF fbStepTimer.Q THEN
-            nErrorID := cErrEnable;
-            eStep    := E_Cia402Step.Error;
-        END_IF
-
-    E_Cia402Step.AbortEnable:
-        // 0x000F may still be on its way, and bEnable FALSE stops with T5,
-        // not T11. 0x0007 is T5 in Operation enabled and nothing in
-        // Switched on; after tStateTimeout there no T4 can still come.
-        IF (eDriveState <> E_Cia402State.SwitchedOn) OR fbStepTimer.Q THEN
-            eStep := E_Cia402Step.Disabled;
-        END_IF
-
-    E_Cia402Step.Homing:
-        // Dropping bit 4 interrupts the run: bEnable FALSE and a mode
-        // change both do that, through the outputs of the next step.
-        IF NOT bEnable THEN
-            eStep := E_Cia402Step.Disabled;
-        ELSIF eDriveState = E_Cia402State.QuickStopActive THEN
-            nErrorID := cErrQuickStop;
-            eStep    := E_Cia402Step.Error;
-        ELSIF eDriveState <> E_Cia402State.OperationEnabled THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF (nMode <> stDrive.nModesOfOperation)
-              OR (nMode <> stDrive.nModesDisplay)
-        THEN
-            eStep := E_Cia402Step.SetMode;
-        ELSIF bHomingRunSeen
-              AND ((stDrive.nStatusword AND 16#2000) <> 0)
-        THEN
-            nErrorID := cErrHoming;
-            eStep    := E_Cia402Step.Error;
-        ELSIF bHomingRunSeen
-              AND ((stDrive.nStatusword AND 16#3400) = 16#1400)
-        THEN
-            eStep := E_Cia402Step.Running;
-        ELSIF fbStepTimer.Q THEN
-            nErrorID := cErrHomingTime;
-            eStep    := E_Cia402Step.Error;
-        END_IF
-
-    E_Cia402Step.Running:
-        IF NOT bEnable THEN
-            eStep := E_Cia402Step.Disabled;
-        ELSIF eDriveState = E_Cia402State.QuickStopActive THEN
-            nErrorID := cErrQuickStop;
-            eStep    := E_Cia402Step.Error;
-        ELSIF eDriveState <> E_Cia402State.OperationEnabled THEN
-            nErrorID := cErrLeftState;
-            eStep    := E_Cia402Step.Error;
-        ELSIF (nMode <> stDrive.nModesOfOperation)
-              OR (nMode <> stDrive.nModesDisplay)
-        THEN
-            eStep := E_Cia402Step.SetMode;
-        END_IF
-
-    E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:
-        // A drive can leave Fault without this edge: a reset it took late,
-        // its own input. Bit 7 is low already, so a state that has lasted
-        // the whole step is judged here, and no attempt is counted: none was
-        // made. Fault reaction active is still the fault: it is waited for,
-        // up to fbResetLimit.
-        IF fbStepTimer.Q THEN
-            IF eDriveState = E_Cia402State.Fault THEN
-                eStep := E_Cia402Step.ResetEdge;
-            ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN
-                nErrorID := 0;
-                eStep    := E_Cia402Step.Disabled;
-            ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN
-                nErrorID := cErrLeftState;
-                eStep    := E_Cia402Step.Error;
-            END_IF
-        END_IF
-
-    E_Cia402Step.ResetEdge:
-        // Hold the edge until the drive leaves Fault or the timeout, then
-        // release bit 7 either way. A state seen for one scan may be a bad
-        // word: the step stays, so that the drive still gets its edge.
-        IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)
-           OR fbStepTimer.Q
-        THEN
-            eStep := E_Cia402Step.ResetRelease;
-        END_IF
-
-    E_Cia402Step.ResetRelease:
-        IF fbStepTimer.Q THEN
-            IF eDriveState = E_Cia402State.SwitchOnDisabled THEN
-                nErrorID := 0;
-                eStep    := E_Cia402Step.Disabled;
-            ELSIF (eDriveState <> E_Cia402State.Fault)
-                  AND (eDriveState <> E_Cia402State.FaultReactionActive)
+            ELSIF (bHomingRunSeen OR fbHomingStart.Q)
+                  AND ((stDrive.nStatusword AND 16#2000) <> 0)
             THEN
+                nErrorID := cErrHoming;
+                eStep    := E_Cia402Step.Error;
+            ELSIF bHomingRunSeen
+                  AND ((stDrive.nStatusword AND 16#3400) = 16#1400)
+            THEN
+                eStep := E_Cia402Step.Running;
+            ELSIF fbStepTimer.Q THEN
+                nErrorID := cErrHomingTime;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.Running:
+            IF NOT bEnable THEN
+                eStep := E_Cia402Step.Disabled;
+            ELSIF eDriveState = E_Cia402State.QuickStopActive THEN
+                nErrorID := cErrQuickStop;
+                eStep    := E_Cia402Step.Error;
+            ELSIF eDriveState <> E_Cia402State.OperationEnabled THEN
                 nErrorID := cErrLeftState;
                 eStep    := E_Cia402Step.Error;
-            ELSE
-                // Still faulted: the cause is still there. Read 0x603F.
-                nResetCount := nResetCount + 1;
-                IF nResetCount < stConfig.nResetAttempts THEN
-                    eStep := E_Cia402Step.ResetPause;
-                ELSE
-                    nErrorID := cErrResetFailed;
+            ELSIF (nMode <> stDrive.nModesOfOperation)
+                  OR (nMode <> stDrive.nModesDisplay)
+            THEN
+                eStep := E_Cia402Step.SetMode;
+            END_IF
+
+        E_Cia402Step.ResetLow, E_Cia402Step.ResetPause:
+            // A drive can leave Fault without this edge: a reset it took late,
+            // its own input. Bit 7 is low already, so a state that has lasted
+            // the whole step is judged here, and no attempt is counted: none
+            // was made. Fault reaction active is still the fault: it is waited
+            // for, up to fbResetLimit.
+            IF fbStepTimer.Q THEN
+                IF eDriveState = E_Cia402State.Fault THEN
+                    eStep := E_Cia402Step.ResetEdge;
+                ELSIF eDriveState = E_Cia402State.SwitchOnDisabled THEN
+                    nErrorID := 0;
+                    eStep    := E_Cia402Step.Disabled;
+                ELSIF eDriveState <> E_Cia402State.FaultReactionActive THEN
+                    nErrorID := cErrLeftState;
                     eStep    := E_Cia402Step.Error;
                 END_IF
             END_IF
-        END_IF
 
-    E_Cia402Step.QuickStop:
-        IF NOT bQuickStopHeld THEN
-            eStep := E_Cia402Step.Disabled;
-        ELSIF fbQuickStopTimer.Q THEN
-            nErrorID := cErrNoQuickStop;
-            eStep    := E_Cia402Step.Error;
-        END_IF
-
-    E_Cia402Step.Error:
-        // On the way down, as Disabled. A reset waits while the drive is
-        // in Fault reaction active or its statusword decodes to nothing,
-        // and for a second scan of a new state: ResetLow sends 0x0000.
-        IF bResetRequest AND NOT bDriveMoved THEN
-            IF eDriveState = E_Cia402State.Fault THEN
-                nErrorID    := 0;
-                nResetCount := 0;
-                eStep       := E_Cia402Step.ResetLow;
-            ELSIF (eDriveState <> E_Cia402State.FaultReactionActive)
-                  AND (eDriveState <> E_Cia402State.Unknown)
+        E_Cia402Step.ResetEdge:
+            // Hold the edge until the drive leaves Fault or the timeout, then
+            // release bit 7 either way. A state seen for one scan may be a bad
+            // word: the step stays, so that the drive still gets its edge.
+            IF ((eDriveState <> E_Cia402State.Fault) AND NOT bDriveMoved)
+               OR fbStepTimer.Q
             THEN
-                nErrorID := 0;
-                eStep    := E_Cia402Step.Disabled;
+                eStep := E_Cia402Step.ResetRelease;
             END_IF
-        END_IF
 
-ELSE
-    nErrorID := cErrInvalidStep;
-    eStep    := E_Cia402Step.Error;
-END_CASE
-
-// 5. Outputs, from the step the FB is in after this scan's transitions:
-//    the word sent always belongs to the step that holds it.
-CASE eStep OF
-
-    E_Cia402Step.Disabled, E_Cia402Step.Error:
-        // The way down: the states of cia402.py plan <state> sod, with
-        // 0x0002 for T7, T10 while 0x000F may still come. One word per
-        // state, but for the first scan of a state: see bDriveMoved below.
-        CASE eDriveState OF
-            E_Cia402State.OperationEnabled:
-                // 0x0002 sent below may have gone out after a statusword
-                // that is only now showing the climb: hold it, one command
-                // at a time, until no 0x000F can still come.
-                IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)
-                   OR ((stDrive.nControlword = 16#0002)
-                       AND NOT fbEnableWordOff.Q)
+        E_Cia402Step.ResetRelease:
+            IF fbStepTimer.Q THEN
+                IF eDriveState = E_Cia402State.SwitchOnDisabled THEN
+                    nErrorID := 0;
+                    eStep    := E_Cia402Step.Disabled;
+                ELSIF (eDriveState <> E_Cia402State.Fault)
+                      AND (eDriveState <> E_Cia402State.FaultReactionActive)
                 THEN
-                    stDrive.nControlword := 16#0002;   // T11, in Error
+                    nErrorID := cErrLeftState;
+                    eStep    := E_Cia402Step.Error;
                 ELSE
-                    stDrive.nControlword := 16#0007;   // T5, stops as 0x605C
+                    // Still faulted: the cause is still there. Read 0x603F.
+                    nResetCount := nResetCount + 1;
+                    IF nResetCount < stConfig.nResetAttempts THEN
+                        eStep := E_Cia402Step.ResetPause;
+                    ELSE
+                        nErrorID := cErrResetFailed;
+                        eStep    := E_Cia402Step.Error;
+                    END_IF
                 END_IF
-            E_Cia402State.QuickStopActive:
-                IF fbStandstill.Q THEN
-                    stDrive.nControlword := 16#0000;   // T12, stopped
+            END_IF
+
+        E_Cia402Step.QuickStop:
+            IF NOT bQuickStopHeld THEN
+                eStep := E_Cia402Step.Disabled;
+            ELSIF fbQuickStopTimer.Q THEN
+                nErrorID := cErrNoQuickStop;
+                eStep    := E_Cia402Step.Error;
+            END_IF
+
+        E_Cia402Step.Error:
+            // On the way down, as Disabled. A reset waits while the drive is
+            // in Fault reaction active or its statusword decodes to nothing,
+            // and for a second scan of a new state: ResetLow sends 0x0000.
+            IF bResetRequest AND NOT bDriveMoved THEN
+                IF eDriveState = E_Cia402State.Fault THEN
+                    nErrorID    := 0;
+                    nResetCount := 0;
+                    eStep       := E_Cia402Step.ResetLow;
+                ELSIF (eDriveState <> E_Cia402State.FaultReactionActive)
+                      AND (eDriveState <> E_Cia402State.Unknown)
+                THEN
+                    nErrorID := 0;
+                    eStep    := E_Cia402Step.Disabled;
+                END_IF
+            END_IF
+
+    ELSE
+        nErrorID := cErrInvalidStep;
+        eStep    := E_Cia402Step.Error;
+    END_CASE
+
+    // 5. Outputs, from the step the FB is in after this scan's transitions:
+    //    the word sent always belongs to the step that holds it.
+    CASE eStep OF
+
+        E_Cia402Step.Disabled, E_Cia402Step.Error:
+            // The way down: the states of cia402.py plan <state> sod, with
+            // 0x0002 for T7, T10 while 0x000F may still come. One word per
+            // state, but for the first scan of a state: see bDriveMoved below.
+            CASE eDriveState OF
+                E_Cia402State.OperationEnabled:
+                    // 0x0002 sent below may have gone out after a statusword
+                    // that is only now showing the climb: hold it, one command
+                    // at a time, until no 0x000F can still come.
+                    IF (bQuickStopHeld AND NOT fbQuickStopTimer.Q)
+                       OR ((stDrive.nControlword = 16#0002)
+                           AND NOT fbEnableWordOff.Q)
+                    THEN
+                        stDrive.nControlword := 16#0002;   // T11, in Error
+                    ELSE
+                        stDrive.nControlword := 16#0007;   // T5, per 0x605C
+                    END_IF
+                E_Cia402State.QuickStopActive:
+                    IF fbStandstill.Q THEN
+                        stDrive.nControlword := 16#0000;   // T12, stopped
+                    ELSE
+                        stDrive.nControlword := 16#0002;   // let it finish
+                    END_IF
+                E_Cia402State.SwitchedOn, E_Cia402State.ReadyToSwitchOn:
+                    // T10, T7. 0x0002 leaves these two as 0x0000 does, but a
+                    // late statusword may hide a 0x000F that has put the drive
+                    // back in Operation enabled: there it is T11, and 0x0000
+                    // is T9. A drive may ignore bit 2 and read it as Shutdown.
+                    // Once bit 3 has been off for tStateTimeout no 0x000F can
+                    // still come. Seen for one scan it may be a bad word: keep
+                    // the last word, never 0x0002 here, which would chase
+                    // 0x0000 on such a drive.
+                    IF fbEnableWordOff.Q AND NOT bDriveMoved THEN
+                        stDrive.nControlword := 16#0000;
+                    ELSIF fbEnableWordOff.Q THEN
+                        stDrive.nControlword := stDrive.nControlword
+                                                AND 16#0007;
+                    ELSE
+                        stDrive.nControlword := 16#0002;
+                    END_IF
+                E_Cia402State.Fault, E_Cia402State.FaultReactionActive,
+                E_Cia402State.Unknown:
+                    // Keep the last word, less enable operation, the mode bits
+                    // and bit 7: it cannot enable, and it cannot cut power. A
+                    // drive in Fault ignores it, and the word may be a bad one.
+                    IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN
+                        stDrive.nControlword := 16#0002;
+                    ELSE
+                        stDrive.nControlword := stDrive.nControlword
+                                                AND 16#0007;
+                    END_IF
+            ELSE
+                // At rest. Seen for one scan it may be a bad word: to a drive
+                // still enabled, 0x0000 would be T9.
+                IF bDriveMoved THEN
+                    stDrive.nControlword := stDrive.nControlword AND 16#0007;
                 ELSE
-                    stDrive.nControlword := 16#0002;   // let it finish
-                END_IF
-            E_Cia402State.SwitchedOn, E_Cia402State.ReadyToSwitchOn:
-                // T10, T7. 0x0002 leaves these two as 0x0000 does, but a late
-                // statusword may hide a 0x000F that has put the drive back
-                // in Operation enabled: there it is T11, and 0x0000 is T9.
-                // A drive may ignore bit 2 and read it as Shutdown. Once bit
-                // 3 has been off for tStateTimeout no 0x000F can still come.
-                // Seen for one scan it may be a bad word: keep the last word,
-                // never 0x0002 here, which would chase 0x0000 on such a drive.
-                IF fbEnableWordOff.Q AND NOT bDriveMoved THEN
                     stDrive.nControlword := 16#0000;
-                ELSIF fbEnableWordOff.Q THEN
-                    stDrive.nControlword := stDrive.nControlword AND 16#0007;
-                ELSE
-                    stDrive.nControlword := 16#0002;
                 END_IF
-            E_Cia402State.Fault, E_Cia402State.FaultReactionActive,
-            E_Cia402State.Unknown:
-                // Keep the last word, less enable operation, the mode bits
-                // and bit 7: it cannot enable, and it cannot cut power. A
-                // drive in Fault ignores it, and the word may be a bad one.
-                IF bQuickStopHeld AND NOT fbQuickStopTimer.Q THEN
-                    stDrive.nControlword := 16#0002;
-                ELSE
-                    stDrive.nControlword := stDrive.nControlword AND 16#0007;
-                END_IF
-        ELSE
-            // At rest. Seen for one scan it may be a bad word: to a drive
-            // still enabled, 0x0000 would be T9.
-            IF bDriveMoved THEN
-                stDrive.nControlword := stDrive.nControlword AND 16#0007;
+            END_CASE
+
+        E_Cia402Step.WaitReady, E_Cia402Step.ResetLow,
+        E_Cia402Step.ResetRelease, E_Cia402Step.ResetPause:
+            stDrive.nControlword := 16#0000;
+
+        E_Cia402Step.Shutdown:
+            stDrive.nControlword := 16#0006;   // T2
+
+        E_Cia402Step.SwitchOn, E_Cia402Step.AbortEnable:
+            stDrive.nControlword := 16#0007;   // T3; or T5 after a late T4
+
+        E_Cia402Step.SetMode:
+            IF eDriveState = E_Cia402State.OperationEnabled THEN
+                stDrive.nControlword := 16#000F;   // hold Operation enabled
+            ELSE
+                stDrive.nControlword := 16#0007;   // hold Switched on
+            END_IF
+            IF bSetModeLastScan THEN
+                stDrive.nModesOfOperation := nMode;
+            END_IF
+
+        E_Cia402Step.EnableOperation:
+            stDrive.nControlword := 16#000F;   // T4
+
+        E_Cia402Step.Homing:
+            stDrive.nControlword := 16#001F;   // bit 4: homing start, held
+
+        E_Cia402Step.Running:
+            // The caller's bits from the second scan on: on the first, the
+            // caller has not seen bValid yet.
+            IF (nMode = 6) OR NOT bRunningLastScan THEN
+                stDrive.nControlword := 16#000F;
+            ELSE
+                stDrive.nControlword := 16#000F
+                                        OR (stDrive.nModeBits AND cModeBits);
+            END_IF
+
+        E_Cia402Step.QuickStop:
+            // 0x0002 is T11 in Operation enabled and goes to Switch on disabled
+            // from the two states below it, so that a T4 still on its way meets
+            // T11. 0x0000 there could be T9.
+            IF bAtRest OR fbStandstill.Q THEN
+                stDrive.nControlword := 16#0000;   // at rest; or T12, stopped
+            ELSE
+                stDrive.nControlword := 16#0002;   // T11, held
+            END_IF
+
+        E_Cia402Step.ResetEdge:
+            // T15, a rising edge on bit 7: only ever sent to a drive in Fault.
+            IF eDriveState = E_Cia402State.Fault THEN
+                stDrive.nControlword := 16#0080;
             ELSE
                 stDrive.nControlword := 16#0000;
             END_IF
-        END_CASE
 
-    E_Cia402Step.WaitReady, E_Cia402Step.ResetLow,
-    E_Cia402Step.ResetRelease, E_Cia402Step.ResetPause:
+    ELSE
         stDrive.nControlword := 16#0000;
+    END_CASE
+    bSetModeLastScan := (eStep = E_Cia402Step.SetMode);
+    bRunningLastScan := (eStep = E_Cia402Step.Running);
 
-    E_Cia402Step.Shutdown:
-        stDrive.nControlword := 16#0006;   // T2
-
-    E_Cia402Step.SwitchOn, E_Cia402Step.AbortEnable:
-        stDrive.nControlword := 16#0007;   // T3; or T5 after a late T4
-
-    E_Cia402Step.SetMode:
-        IF eDriveState = E_Cia402State.OperationEnabled THEN
-            stDrive.nControlword := 16#000F;   // hold Operation enabled
-        ELSE
-            stDrive.nControlword := 16#0007;   // hold Switched on
+    // 6. Set-points. From bValid on they are the caller's. Without torque the
+    //    FB holds them where enabling cannot move the motor. With the drive
+    //    enabled it leaves them as they were, so that it never steps one the
+    //    drive is following; a mode switch makes the new mode's set-point
+    //    safe. The caller's mode bits are cleared until bValid. One scan of
+    //    a new state does not count: the drive may still be following.
+    IF (eStep = E_Cia402Step.Running)
+       OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))
+    THEN
+        ;
+    ELSIF (eDriveState <> E_Cia402State.OperationEnabled)
+          AND (eDriveState <> E_Cia402State.QuickStopActive)
+    THEN
+        stDrive.nTargetPosition := stDrive.nPositionActual;
+        stDrive.nTargetVelocity := 0;
+        stDrive.nTargetTorque   := 0;
+        stDrive.nModeBits       := 0;
+    ELSE
+        IF eStep = E_Cia402Step.SetMode THEN
+            CASE nMode OF
+                1, 8:
+                    stDrive.nTargetPosition := stDrive.nPositionActual;
+                3, 9:
+                    stDrive.nTargetVelocity := 0;
+                4, 10, 11:
+                    stDrive.nTargetTorque := 0;
+            ELSE
+                ;   // a mode of the drive's own: see its manual
+            END_CASE
         END_IF
-        IF bSetModeLastScan THEN
-            stDrive.nModesOfOperation := nMode;
-        END_IF
-
-    E_Cia402Step.EnableOperation:
-        stDrive.nControlword := 16#000F;   // T4
-
-    E_Cia402Step.Homing:
-        stDrive.nControlword := 16#001F;   // bit 4: homing start, held
-
-    E_Cia402Step.Running:
-        // The caller's bits from the second scan on: on the first, the
-        // caller has not seen bValid yet.
-        IF (nMode = 6) OR NOT bRunningLastScan THEN
-            stDrive.nControlword := 16#000F;
-        ELSE
-            stDrive.nControlword := 16#000F
-                                    OR (stDrive.nModeBits AND cModeBits);
-        END_IF
-
-    E_Cia402Step.QuickStop:
-        // 0x0002 is T11 in Operation enabled and goes to Switch on disabled
-        // from the two states below it, so that a T4 still on its way meets
-        // T11. 0x0000 there could be T9.
-        IF bAtRest OR fbStandstill.Q THEN
-            stDrive.nControlword := 16#0000;   // at rest; or T12, stopped
-        ELSE
-            stDrive.nControlword := 16#0002;   // T11, held
-        END_IF
-
-    E_Cia402Step.ResetEdge:
-        // T15, a rising edge on bit 7: only ever sent to a drive in Fault.
-        IF eDriveState = E_Cia402State.Fault THEN
-            stDrive.nControlword := 16#0080;
-        ELSE
-            stDrive.nControlword := 16#0000;
-        END_IF
-
-ELSE
-    stDrive.nControlword := 16#0000;
-END_CASE
-bSetModeLastScan := (eStep = E_Cia402Step.SetMode);
-bRunningLastScan := (eStep = E_Cia402Step.Running);
-
-// 6. Set-points. From bValid on they are the caller's. Without torque the
-//    FB holds them where enabling cannot move the motor. With the drive
-//    enabled it leaves them as they were, so that it never steps one the
-//    drive is following; a mode switch makes the new mode's set-point
-//    safe. The caller's mode bits are cleared until bValid. One scan of
-//    a new state does not count: the drive may still be following.
-IF (eStep = E_Cia402Step.Running)
-   OR (bDriveMoved AND (eStep <> E_Cia402Step.SetMode))
-THEN
-    ;
-ELSIF (eDriveState <> E_Cia402State.OperationEnabled)
-      AND (eDriveState <> E_Cia402State.QuickStopActive)
-THEN
-    stDrive.nTargetPosition := stDrive.nPositionActual;
-    stDrive.nTargetVelocity := 0;
-    stDrive.nTargetTorque   := 0;
-    stDrive.nModeBits       := 0;
-ELSE
-    IF eStep = E_Cia402Step.SetMode THEN
-        CASE nMode OF
-            1, 8:
-                stDrive.nTargetPosition := stDrive.nPositionActual;
-            3, 9:
-                stDrive.nTargetVelocity := 0;
-            4, 10, 11:
-                stDrive.nTargetTorque := 0;
-        ELSE
-            ;   // a mode of the drive's own: see its manual
-        END_CASE
+        stDrive.nModeBits := 0;
     END_IF
-    stDrive.nModeBits := 0;
-END_IF
 
-bValid := (eStep = E_Cia402Step.Running);
-bError := (eStep = E_Cia402Step.Error);
-bBusy  := NOT bValid AND NOT bError
-          AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop)) OR NOT bAtRest);
+    bValid := (eStep = E_Cia402Step.Running);
+    bError := (eStep = E_Cia402Step.Error);
+    bBusy  := NOT bValid AND NOT bError
+              AND ((bEnable AND (eStep <> E_Cia402Step.QuickStop))
+                   OR NOT bAtRest);
+END_IF
 ]]></ST>
     </Implementation>
   </POU>

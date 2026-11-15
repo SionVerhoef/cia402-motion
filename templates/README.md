@@ -6,7 +6,9 @@ it down again, with a quick stop if you ask for one, and resets faults, keeping 
 `../references/state-machine.md`.
 
 > **Status: reviewed, not run on a drive.** twincat-st's `st_review.py` reports no high
-> findings and one medium (CP23: 11 pins, where PLCopen suggests about 10), and
+> findings. Its mediums are CP23 (12 pins, where PLCopen suggests about 10) and X12 for each
+> timer and edge trigger, which are not called while `bInputsValid` is FALSE: on purpose, so
+> that their time runs on and a `bReset` edge held through the gap is seen after it. And
 > `tests/test_templates.py` runs the FB's own text against a simulated drive. It has never
 > been compiled in TwinCAT or CODESYS, and it has never driven a real drive. Test it with
 > reduced torque and speed limits before anyone stands near the machine. It is not a safety
@@ -53,6 +55,7 @@ changed.
 | `nMode` | SINT in | The 0x6060 code. 6 means home: `bValid` then says homed. Change it at standstill |
 | `bReset` | BOOL in | Rising edge: clear the error; from Fault, run the reset first |
 | `bQuickStop` | BOOL in | TRUE, one scan is enough: quick stop, 0x0002 held, over `bEnable`. See *Quick stop*. Not a safety function |
+| `bInputsValid` | BOOL in, default TRUE | FALSE: the inputs are not the drive's. See *Inputs that are not the drive's* |
 | `stConfig` | `ST_Cia402Config` in | The defaults are in the type. Not checked: a zero timeout times out at once |
 | `bValid` | BOOL out | Enabled in `nMode`: the set-points in `stDrive` are yours |
 | `bBusy` | BOOL out | On the way to what `bEnable` asks |
@@ -87,8 +90,9 @@ FALSE: watch `eDriveState`.
 | 16#8111 | Still in Fault after `nResetAttempts` resets: the cause is still there |
 | 16#8112 | Quick stop active, not asked for with `bQuickStop` |
 | 16#8113 | The drive moved where the FB did not ask: out of the state it was holding, during a mode switch, or out of a reset |
-| 16#8114 | Homing error, statusword bit 13 |
+| 16#8114 | Homing error, statusword bit 13: after the drive showed this run in progress, or still set `tStateTimeout` after bit 4 went out (a method the drive refuses) |
 | 16#8115 | The statusword matches no state and its fault bit is 0, or reads Not ready after the drive had left it (inputs that are not the drive's) |
+| 16#8116 | `bInputsValid` FALSE for longer than `tInputsInvalid` |
 | 16#8120 | `nMode` is 0 |
 
 ## Quick stop
@@ -145,6 +149,22 @@ position jitter at standstill, and the FB sends T12 once 0x6064 has stayed insid
 `tStandstill`. Without the flag the FB waits for ever: safe, but stuck. The flag needs 0x6064
 copied in, and a `tStandstill` longer than the drive's position update period.
 
+## Inputs that are not the drive's
+
+Wire `bInputsValid` to what says this cycle's inputs came from the drive: on EtherCAT the
+slave's WcState 0 and its state OP, on CANopen the PDO received this cycle. While it is FALSE
+the FB reads nothing from `stDrive` and changes no step, and every output stays as the last
+scan left it: the same controlword, 0x6060 and set-points, and `bValid` as it was, so that one
+lost frame does not restart the caller's trajectory. Only `bQuickStop` still acts: 0x0002 goes
+out at once and is held.
+
+The timers run on. A step judged on the first valid scan has had the time that passed, and the
+new statusword is read before the timeout. Longer than `stConfig.tInputsInvalid` (default
+T#100MS) is 16#8116, and the way down starts on the first valid scan. Until then the FB still
+sends the last word: what stops a drive the FB cannot see is the drive's own reaction to a lost
+bus, 0x6007 or the vendor's (`../references/canopen-transport.md`). Left at TRUE, the FB
+behaves as before this input existed.
+
 ## Wiring it, in TwinCAT
 
 ```
@@ -157,6 +177,8 @@ VAR
     bAcknowledge  : BOOL;    // from the HMI
     bLineStop     : BOOL;    // from the application; not a safety input
     nTrajectory1  : DINT;    // your CSP set-point generator's output
+    bWcState1  AT %I* : BOOL;   // link: the slave's WcState
+    nEcState1  AT %I* : UINT;   // link: the slave's InfoData.State, 8 = OP
     nStatus1   AT %I* : UINT;   // link: 0x6041
     nDisplay1  AT %I* : SINT;   // 0x6061
     nActual1   AT %I* : DINT;   // 0x6064
@@ -169,6 +191,7 @@ stAxis1.nStatusword     := UINT_TO_WORD(nStatus1);
 stAxis1.nModesDisplay   := nDisplay1;
 stAxis1.nPositionActual := nActual1;
 fbAxis1(bEnable := bAxis1On, nMode := 8, bReset := bAcknowledge, bQuickStop := bLineStop,
+        bInputsValid := NOT bWcState1 AND (nEcState1 = 8),
         stConfig := stConfig1, stDrive := stAxis1);
 fbValidRise1(CLK := fbAxis1.bValid);
 IF fbValidRise1.Q THEN
@@ -233,10 +256,9 @@ write 0x6060 by SDO for every mode switch and copy 0x6061, read by SDO, into
 
 ## What it cannot see
 
-- **Whether the inputs are the drive's.** If the bus stops (EtherCAT WcState ≠ 0, a CANopen PDO
-  not received), the inputs may freeze, and the FB keeps reading the last statusword as true.
-  Gate on the bus state in your application, and hand bus faults to **ethercat-diagnostics**.
-  Inputs that drop to 0 are caught: Not ready after another state is 16#8115.
+- **Whether the inputs are the drive's**, unless `bInputsValid` says so. Left at TRUE, inputs
+  that freeze when the bus stops are read as true. Inputs that drop to 0 are caught either way:
+  Not ready after another state is 16#8115. Hand bus faults to **ethercat-diagnostics**.
 - **Whether one statusword is true.** A word that shows Fault, Switch on disabled or another
   new state raises its error and starts the way down at once, but 0x0000, a fault reset, T2 from
   rest and a change of set-point wait for the next scan to show the same state. So one bad scan
@@ -301,7 +323,10 @@ compared with `cia402.py plan`, 0x0002 for T7 and T10 being the one difference. 
   changes state on every scan, with and without a quick stop, and the longest attempt that is
   not one of these;
 - mode switches, including during T4 and in the middle of homing;
-- homing, including a result and an error left over from an earlier run;
+- homing, including a result and an error left over from an earlier run, and a method the
+  drive refuses at once, with the earlier error still showing;
+- `bInputsValid` FALSE for one scan while running, for longer than `tInputsInvalid`, and with a
+  quick stop asked meanwhile;
 - the error paths.
 
 Each rule in the list `BROKEN_RULES` is broken on purpose in a copy of the text, and the scenario

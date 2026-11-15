@@ -11,6 +11,7 @@ STRUCT
     bQuickStopStays   : BOOL := FALSE;    // 0x605A is 5-8 on this drive
     nStandstillWindow : DINT := 0;        // position band, 0x6064 units
     tStandstill       : TIME := T#100MS;  // in the band this long: stopped
+    tInputsInvalid    : TIME := T#100MS;  // bInputsValid FALSE this long: error
 END_STRUCT
 END_TYPE
 ]]></Declaration>

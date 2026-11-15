@@ -123,10 +123,12 @@ on this page.
   mode codes and homing-method directions. Mode 11 is the exception: canopen does not have it.
 - **Every `plan` is replayed on an independent model drive** in the tests, and `pdo` has a test
   for each rule.
-- **`FB_Cia402Axis` passes twincat-st's reviewer**, `--pedantic` included, with one medium
-  finding (CP23: 11 pins, where PLCopen suggests about 10), and its file check.
+- **`FB_Cia402Axis` passes twincat-st's reviewer**, `--pedantic` included, with no high finding,
+  and its file check.
+  The mediums are CP23 (12 pins, where PLCopen suggests about 10) and X12 for the timers that
+  `bInputsValid` FALSE skips on purpose (`templates/README.md`).
   Its own Structured Text runs against a simulated drive whose statusword arrives up to three
-  cycles late, every scan checked against the state-machine rules. Each of 53 rules broken on
+  cycles late, every scan checked against the state-machine rules. Each of 86 rules broken on
   purpose makes the scenario named for it fail.
 - **The tests pass on Linux and Windows, and on Python 3.8.**
 - **Agent behaviour in A/B evals** on Opus 5.5 and Haiku 5.5, and the safety refusal on Haiku
