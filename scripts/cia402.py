@@ -1108,7 +1108,7 @@ def check_pdo(rx, tx, modes):
 TRACE_COLUMNS = (
     ('cw', ('6040', 'controlword')),
     ('sw', ('6041', 'statusword')),
-    ('display', ('6061', 'modesofoperationdisplay', 'modedisplay')),
+    ('display', ('6061', 'modesofoperationdisplay', 'modedisplay', 'modesdisplay')),
     ('mode', ('6060', 'modesofoperation')),
     ('time', ('time',)),
 )

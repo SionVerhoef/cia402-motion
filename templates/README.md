@@ -11,7 +11,8 @@ it down again, with a quick stop if you ask for one, and resets faults, keeping 
 > that their time runs on and a `bReset` edge held through the gap is seen after it. And
 > `tests/test_templates.py` runs the FB's own text against a simulated drive. It has never
 > been compiled in TwinCAT or CODESYS, and it has never driven a real drive. Test it with
-> reduced torque and speed limits before anyone stands near the machine. It is not a safety
+> reduced torque and speed limits before anyone stands near the machine, following
+> `bench-test.md`. It is not a safety
 > function: STO, SS1 and safe stops belong in a safety controller
 > (`../references/safety-boundary.md`).
 
@@ -40,6 +41,7 @@ generates no trajectory: `MC_MoveAbsolute` and the other motion blocks have no c
 | `ST_Cia402Drive.TcDUT` | One axis' process data: what goes to and comes from the drive |
 | `ST_Cia402Config.TcDUT` | Timeouts, reset retries, quick-stop handling |
 | `FB_Cia402Axis.st` | All five as one plain Structured Text file, the same text |
+| `bench-test.md` | The protocol for its first run on a real drive: compile, bench, scenarios, what to record |
 
 The TwinCAT files were made with twincat-st's `tcpou.py` and pass its `check`. To add them to a
 project under other names, use `tcpou.py new` and `set` for each part, so each object gets a
