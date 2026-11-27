@@ -173,8 +173,18 @@ the EL7211-9014 query, 1 of 3; run again six times with this description and six
 before, it fired 6 of 6 with both, so that was noise. Haiku missed Synapticon 3 of 3, as before,
 and the python-canopen query once.
 
-After that run, "Not for" was reworded to give CODESYS SoftMotion its own entry instead of
-sharing twincat-motion's; the trigger evals were not rerun on that wording.
+**SoftMotion on its own entry** (2026-11-27, three runs per query, three workers). After that
+run, "Not for" was reworded to give CODESYS SoftMotion its own entry instead of sharing
+twincat-motion's; this is the description released in v0.3.0.
+
+| Description | Haiku 5.5 should · old · 11-10 · 11-13 near-miss | Opus 5.5 should · old · 11-10 · 11-13 near-miss |
+|---|---|---|
+| as in `SKILL.md` | 51/54 · 0/33 · 0/24 · 0/12 | 54/54 · 3/33 · 0/24 · 0/12 |
+
+The rewording changed nothing measurable. The SoftMotion near-misses did not fire on either
+model. All three Opus misfires are the NC axis query, 3 of 3. Haiku's three misses are three
+different queries, 2 of 3 each (EPOS4-to-Nanotec homing, Synapticon, the inverter), which is
+within the three-run noise seen before.
 
 The A/B results are in `results-ab.md` (v0.1) and `results-ab-v0.2.md` to `results-ab-v0.4.md`.
 

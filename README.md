@@ -143,11 +143,11 @@ most important fact on this page.
 - **Agent behaviour in A/B evals** on Opus 5.5 and Haiku 5.5, and the safety refusal on Haiku
   4.5 as well: see above and [`evals/results-ab.md`](evals/results-ab.md).
 - **The description fires on CiA 402 questions, not on their neighbours.** In the last trigger
-  run (2026-11-13) it fired in 52 of 54 runs of queries it should take on Opus 5.5 and 50 of 54
-  on Haiku 5.5, and in 2 of 69 runs of near-misses (EtherCAT faults, ESI files, PROFIdrive,
-  safety logic, SoftMotion, loop tuning, plain Structured Text) on Opus and none on Haiku. Both
-  misfires were on a TwinCAT NC axis question that sits on the boundary. The first description
-  fired in only 11 of 39 on Haiku. "Not for" was reworded once since and not rerun:
+  run (2026-11-27, the v0.3.0 description) it fired in 54 of 54 runs of queries it should take
+  on Opus 5.5 and 51 of 54 on Haiku 5.5, and in 3 of 69 runs of near-misses (EtherCAT faults,
+  ESI files, PROFIdrive, safety logic, SoftMotion, loop tuning, plain Structured Text) on Opus
+  and none on Haiku. All three misfires were on a TwinCAT NC axis question that sits on the
+  boundary. The first description fired in only 11 of 39 on Haiku:
   [`evals/README.md`](evals/README.md#trigger-evals).
 
 **Not verified**

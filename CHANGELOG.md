@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Evals**
+
+- Trigger evals rerun on the v0.3.0 description: 54/54 should-trigger on Opus 5.5, 51/54 on
+  Haiku 5.5; near-misses 3/69 on Opus (all the TwinCAT NC axis borderline), none on Haiku.
+  The last wording change made no measurable difference. See `evals/README.md`.
+
 ## 0.3.0 — 2026-11-27
 
 `FB_Cia402Axis` compiles in TwinCAT XAE and matches the bench protocol against a simulated
