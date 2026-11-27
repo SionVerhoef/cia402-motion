@@ -33,6 +33,12 @@ A baseline allowed to search the web did only a little better on the five vendor
 15 on Opus and 9.5 on Haiku against 15 with the skill. Search did not find the vendor departures
 from the profile, and on Haiku it made one triage worse:
 [`evals/results-web-baseline.md`](evals/results-web-baseline.md).
+Later rounds (v0.2 to v0.4) swapped in harder tasks and had an independent model judge the
+answers without knowing the arm. Opus with the skill still got every task right; the only
+skill-arm misses were Haiku on two judgement calls beyond the page. Without the skill, Haiku
+5.5 scored 63% and wrote the STO code in all three answers:
+[`evals/results-ab-v0.2.md`](evals/results-ab-v0.2.md) to
+[`results-ab-v0.4.md`](evals/results-ab-v0.4.md).
 
 ## What is in it
 
@@ -45,7 +51,8 @@ from the profile, and on Haiku it made one triage worse:
 - `templates/`: `FB_Cia402Axis`, a Structured Text function block that drives one axis
   through the state machine, the mode switch, homing, quick stop and fault reset, as TwinCAT 3
   files and as one plain `.st`, with PDO mapping tables for CSP and PP. Status and wiring are in
-  `templates/README.md`.
+  `templates/README.md`; the protocol for its first run on a real drive is
+  `templates/bench-test.md`.
 - `evals/`: the A/B evals, their grader and its self-test, and the trigger evals for the
   description.
 
@@ -112,9 +119,9 @@ Add `--json` for machine-readable output.
 
 ## Status
 
-Nothing here has been run against a real drive, and nothing here can be: there is no drive
-where it is developed. The line between verified and not verified is the most important fact
-on this page.
+Nothing here has been run against a real drive. `templates/bench-test.md` is the protocol for
+the first run when a drive is available. The line between verified and not verified is the
+most important fact on this page.
 
 **Verified**
 
@@ -128,16 +135,17 @@ on this page.
   The mediums are CP23 (12 pins, where PLCopen suggests about 10) and X12 for the timers that
   `bInputsValid` FALSE skips on purpose (`templates/README.md`).
   Its own Structured Text runs against a simulated drive whose statusword arrives up to three
-  cycles late, every scan checked against the state-machine rules. Each of 86 rules broken on
+  cycles late, every scan checked against the state-machine rules. Each of 88 rules broken on
   purpose makes the scenario named for it fail.
 - **The tests pass on Linux and Windows, and on Python 3.8.**
 - **Agent behaviour in A/B evals** on Opus 5.5 and Haiku 5.5, and the safety refusal on Haiku
   4.5 as well: see above and [`evals/results-ab.md`](evals/results-ab.md).
-- **The description fires on CiA 402 questions, not on their neighbours.** In trigger evals it
-  fired in 39 of 39 runs of queries it should take on Opus 5.5 and 37 of 39 on Haiku 5.5, and
-  in 2 of 33 runs of near-misses (EtherCAT faults, ESI files, PROFIdrive, safety logic, plain
-  Structured Text) on Opus and none on Haiku. Both misfires were on a TwinCAT NC axis question
-  that sits on the boundary. The earlier description fired in only 11 of 39 on Haiku:
+- **The description fires on CiA 402 questions, not on their neighbours.** In the last trigger
+  run (2026-11-13) it fired in 52 of 54 runs of queries it should take on Opus 5.5 and 50 of 54
+  on Haiku 5.5, and in 2 of 69 runs of near-misses (EtherCAT faults, ESI files, PROFIdrive,
+  safety logic, SoftMotion, loop tuning, plain Structured Text) on Opus and none on Haiku. Both
+  misfires were on a TwinCAT NC axis question that sits on the boundary. The first description
+  fired in only 11 of 39 on Haiku. "Not for" was reworded once since and not rerun:
   [`evals/README.md`](evals/README.md#trigger-evals).
 
 **Not verified**

@@ -173,7 +173,10 @@ the EL7211-9014 query, 1 of 3; run again six times with this description and six
 before, it fired 6 of 6 with both, so that was noise. Haiku missed Synapticon 3 of 3, as before,
 and the python-canopen query once.
 
-The A/B results are in `results-ab.md` (v0.1) and `results-ab-v0.2.md`.
+After that run, "Not for" was reworded to give CODESYS SoftMotion its own entry instead of
+sharing twincat-motion's; the trigger evals were not rerun on that wording.
+
+The A/B results are in `results-ab.md` (v0.1) and `results-ab-v0.2.md` to `results-ab-v0.4.md`.
 
 A first attempt that ran four checks at once timed
 out most session start-ups and scored them as misses; run one check at a time.
