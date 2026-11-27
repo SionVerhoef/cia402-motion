@@ -15,7 +15,7 @@ drive won't reach Operation Enabled.
 > speed limits, and verify on the real machine before anyone stands near it. Responsibility
 > for the machine stays with whoever commissions it.
 
-**Status: v0.2.0.** Built from the profile as vendor manuals and permissive implementations
+**Status: v0.3.0.** Built from the profile as vendor manuals and permissive implementations
 restate it, and from the vendor documents named on each vendor page. Tested against
 independent models and in A/B evals; **never run against a real drive**. What is verified and
 what is not: [Status](#status).
@@ -66,14 +66,16 @@ git submodule add https://github.com/SionVerhoef/cia402-motion .claude/skills/ci
 Pin a release rather than following `main`, and commit the pin:
 
 ```bash
-git -C .claude/skills/cia402-motion checkout v0.2.0
+git -C .claude/skills/cia402-motion checkout v0.3.0
 git add .claude/skills/cia402-motion
 ```
 
 A plain `git clone` of your repository leaves a submodule folder empty: clone with
-`--recurse-submodules`, or run `git submodule update --init`. Without submodules, unpack a
-release zip from [Releases](https://github.com/SionVerhoef/cia402-motion/releases) into the same
-folder. Other agents that read skill folders (GitHub Copilot in VS Code from `.github/skills/`,
+`--recurse-submodules`, or run `git submodule update --init`. Without submodules, download
+`cia402-motion-<version>.zip` from [Releases](https://github.com/SionVerhoef/cia402-motion/releases)
+and unpack it into `.claude/skills/`: it holds only the skill (no evals or tests) and unpacks as
+`cia402-motion/`. The *Source code* archives carry the whole repository and unpack as
+`cia402-motion-<version>/`; rename that folder to `cia402-motion`. Other agents that read skill folders (GitHub Copilot in VS Code from `.github/skills/`,
 OpenAI Codex from `.agents/skills/`) should load it the same way; that is untested.
 
 The skill hands questions at its edges to sibling skills by name: **ethercat-diagnostics**,

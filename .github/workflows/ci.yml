@@ -38,6 +38,16 @@ jobs:
           found=$(git ls-files '*.pdf' '*.PDF')
           [ -z "$found" ] || { echo "PDF files committed:"; echo "$found"; exit 1; }
 
+      # The release workflow attaches this zip; build it here so a renamed path fails a PR,
+      # not a release.
+      - name: skill-only zip builds
+        run: |
+          zip=$(sh scripts/skill_zip.sh ci)
+          mkdir -p "$RUNNER_TEMP/zip" && cd "$RUNNER_TEMP/zip" && unzip -q "$GITHUB_WORKSPACE/$zip"
+          test -f cia402-motion/SKILL.md && test -f cia402-motion/scripts/cia402.py
+          ! test -e cia402-motion/evals
+          rm -f "$GITHUB_WORKSPACE/$zip"
+
       # Runs before anything is installed: the tool must need nothing but Python.
       - name: tests
         run: python -m unittest discover -s tests -v
