@@ -120,6 +120,6 @@ CiA 402 part.
 Built from the profile as vendor manuals and permissive implementations restate it, and from
 the vendor documents named on each vendor page. `cia402.py` is tested against an independent
 model drive and against python-canopen (mode 11 excepted). `FB_Cia402Axis` in `templates/` is
-reviewed with twincat-st's `st_review.py` and run against a simulated drive; it has never been
-compiled. None of it has been run against a real drive: report at that precision, and say
-"reviewed, not run" when you hand out the template.
+reviewed with twincat-st's `st_review.py`, run against a simulated drive, and compiles clean in
+TwinCAT 3.1.4024.55. None of it has been run against a real drive: report at that precision,
+and say "reviewed, not run" when you hand out the template.

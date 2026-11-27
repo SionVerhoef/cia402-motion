@@ -5,12 +5,13 @@ state machine into Operation enabled in the mode you ask for, homes it, switches
 it down again, with a quick stop if you ask for one, and resets faults, keeping to the rules in
 `../references/state-machine.md`.
 
-> **Status: reviewed, not run on a drive.** twincat-st's `st_review.py` reports no high
-> findings. Its mediums are CP23 (12 pins, where PLCopen suggests about 10) and X12 for each
+> **Status: compiles clean in TwinCAT 3.1.4024.55; matches all `bench-test.md` scenarios
+> against a simulated drive in TwinCAT; not yet run on a real drive.** twincat-st's
+> `st_review.py` reports no high findings. Its mediums are CP23 (12 pins, where PLCopen suggests about 10) and X12 for each
 > timer and edge trigger, which are not called while `bInputsValid` is FALSE: on purpose, so
 > that their time runs on and a `bReset` edge held through the gap is seen after it. And
-> `tests/test_templates.py` runs the FB's own text against a simulated drive. It has never
-> been compiled in TwinCAT or CODESYS, and it has never driven a real drive. Test it with
+> `tests/test_templates.py` runs the FB's own text against a simulated drive. It has not been
+> compiled in CODESYS, and it has never driven a real drive. Test it with
 > reduced torque and speed limits before anyone stands near the machine, following
 > `bench-test.md`. It is not a safety
 > function: STO, SS1 and safe stops belong in a safety controller
@@ -44,8 +45,9 @@ generates no trajectory: `MC_MoveAbsolute` and the other motion blocks have no c
 | `bench-test.md` | The protocol for its first run on a real drive: compile, bench, scenarios, what to record |
 
 The TwinCAT files were made with twincat-st's `tcpou.py` and pass its `check`. To add them to a
-project under other names, use `tcpou.py new` and `set` for each part, so each object gets a
-fresh GUID. The `.st` uses the CODESYS-family syntax TwinCAT shares (`{attribute
+project, copy them and run `tcpou.py reguid` on the copies, so each object gets a fresh GUID
+and the text stays byte for byte. Under other names, use `tcpou.py new` and `set` for each
+part. The `.st` uses the CODESYS-family syntax TwinCAT shares (`{attribute
 'qualified_only'}`, a typed enum `) INT;`); another IEC 61131-3 environment may need those two
 changed.
 
@@ -343,5 +345,6 @@ The tests also check that each TwinCAT file holds the same text as the `.st`, wi
 and a GUID of its own. CI runs `st_review.py --fail-on high` and `tcpou.py check` from a pinned
 twincat-st release.
 
-The simulation is the profile's state machine, not a drive. Nothing here was compiled, and none
-of it shows what a particular drive does.
+The simulation is the profile's state machine, not a drive: none of it shows what a
+particular drive does. `tests/baseline.py` writes the scenarios of `bench-test.md` as CSV, the
+baseline a bench recording is compared with.

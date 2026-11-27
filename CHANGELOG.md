@@ -22,6 +22,16 @@
 
 **Templates**
 
+- Compiled for the first time: TwinCAT XAE 3.1.4024.55 builds `templates/` unchanged with 0
+  errors and 0 warnings, and the compiled FB matched all twelve `bench-test.md` scenarios
+  against an ST port of the simulated drive, with the statusword 1 and 3 cycles late. Not yet
+  run on a real drive.
+- `tests/baseline.py`: writes the `bench-test.md` scenarios, run against the simulated drive,
+  as CSV in the TwinCAT Scope layout, the baseline for a bench recording. All twelve, where
+  the protocol listed eight; `tests/test_baseline.py` checks that they trace clean.
+- `bench-test.md`: scenario 3 sends 0x0000 as soon as the drive shows Switch on disabled;
+  `tStateTimeout` applies only to a drive that stays in Switched on or Ready to switch on.
+  Fresh GUIDs with `tcpou.py reguid` on the copies.
 - `bench-test.md`: the protocol for the template's first run on a real drive: compile with
   `xae_build.ps1`, the bench, twelve scenarios with the words to expect, each recording checked
   with `cia402.py trace`, and what to record (the product, never the unit).
