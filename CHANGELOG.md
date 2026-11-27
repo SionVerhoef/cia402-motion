@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-11-27
+
+`FB_Cia402Axis` compiles in TwinCAT XAE and matches the bench protocol against a simulated
+drive; a reset no longer restarts the axis by itself. `cia402.py trace` checks a recorded log,
+and fourteen vendors get their own page. Still never run against a real drive (README, *Status*).
 
 **Skill**
 
@@ -67,8 +71,14 @@
 - Rounds v0.2 to v0.4 with harder tasks, graded by an independent judge (`judge.py`) blind to
   the arm. Results in `evals/results-ab-v0.2.md` to `results-ab-v0.4.md`.
 
+**Release**
+
+- Each release now carries `cia402-motion-<version>.zip`, the skill alone without evals and
+  tests, which unpacks as `cia402-motion/`. README, Install.
+
 **CI**
 
+- The skill-only zip is built on every PR, so a renamed path fails there, not at a release.
 - Vendor pages must carry a read date (older than a year warns), and every page needs a row in
   the index and in each porting table. `check_private.py` also scans untracked files.
 

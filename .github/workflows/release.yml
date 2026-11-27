@@ -1,0 +1,25 @@
+name: release
+
+# Attaches the skill-only zip to a release when it is published. The tag already exists
+# then, so the zip is built from exactly what the tag points at.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  skill-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: build and attach the skill-only zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          zip=$(sh scripts/skill_zip.sh "$TAG")
+          gh release upload "$TAG" "$zip" --clobber
