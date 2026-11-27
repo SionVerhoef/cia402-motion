@@ -142,8 +142,9 @@ on this page.
 
 **Not verified**
 
-- **No real drive.** `FB_Cia402Axis` has never been compiled in TwinCAT or CODESYS and has never
-  driven a motor. Treat it as reviewed, not run; test with reduced torque and speed limits.
+- **No real drive.** `FB_Cia402Axis` compiles clean in TwinCAT 3.1.4024.55 and matches every
+  bench-test scenario against a simulated drive, but has never driven a motor, nor been compiled
+  in CODESYS. Treat it as reviewed, not run; test with reduced torque and speed limits.
 - **The vendor pages say what the named document said on the date it was read.** No claim was
   checked on hardware, or against other firmware versions.
 - **The CANopen bring-up page** has not been run on a bus.

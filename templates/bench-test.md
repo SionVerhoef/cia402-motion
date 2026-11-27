@@ -1,8 +1,9 @@
 # Bench test: the first run of FB_Cia402Axis on a drive
 
-`FB_Cia402Axis` has been reviewed and simulated, never compiled and never run on a drive
-(`README.md`, Status). This is the protocol for its first run: compile it, run one drive
-through every scenario below at reduced limits, and record what matched the simulation.
+`FB_Cia402Axis` compiles clean in TwinCAT 3.1.4024.55 and has matched every scenario below
+against a simulated drive, but it has never run on a drive (`README.md`, Status). This is the
+protocol for its first run on one: compile it, run one drive through every scenario below at
+reduced limits, and record what matched the simulation.
 Run it again for each new drive family.
 
 The scenarios are ordered so that nothing moves before the steps without motion have passed.
@@ -11,9 +12,9 @@ on.
 
 ## 1. Compile, before any drive
 
-1. Make a TwinCAT 3 PLC project (4024 or later) and add the five files from this folder. To
-   give them fresh GUIDs, create each object with twincat-st's `tcpou.py new` and copy the
-   source in with `tcpou.py set` (`README.md`, Files). Register them with `tcpou.py register`.
+1. Make a TwinCAT 3 PLC project (4024 or later) and copy in the five files from this folder.
+   Give the copies fresh GUIDs with twincat-st's `tcpou.py reguid`, which leaves the text byte
+   for byte (`README.md`, Files), and register them with `tcpou.py register`.
 2. Build without XAE open, from the twincat-st repository:
 
    ```
@@ -60,9 +61,11 @@ It lists each state change with its transition number, and flags where the maste
 `../references/state-machine.md`. **Any error it reports is a bug in the FB or a drive that
 departs from the profile.** Record which. Keep the CSV files outside the repository.
 
-The baseline: scenarios 1–3, 5–7, 9 and 10, run against the simulated drive of
-`tests/test_templates.py` and written out as such a CSV, trace with no error and no warning,
-and one note for the fault in 6.
+The baseline: `python3 tests/baseline.py <dir>` runs scenarios 1–12 in order against the
+simulated drive of `tests/test_templates.py`, with the default `ST_Cia402Config`, and writes
+each as such a CSV (`--lag` sets how many cycles late the statusword comes; default 1). Each
+traces with no error and no warning, and with one note, "read 0x603F", in 6, 7, 8 and 12, the
+recordings that show a fault. `tests/test_baseline.py` checks this.
 
 ## 5. Scenarios
 
@@ -75,7 +78,7 @@ as on a Beckhoff EL72x1). Scenario 7 is the default since PR #52; with
 |---|---|---|---|
 | 1 | Bus to OP, `bEnable` FALSE | 0x0000; `eDriveState` Switch on disabled; `bBusy`, `bValid`, `bError` FALSE | none |
 | 2 | `bEnable` TRUE, `nMode` 8 (CSP), no trajectory | 0x0006, then 0x0007, then 0x000F (T2, T3, T4); 0x6060 = 8 and 0x6061 = 8 before 0x000F; 0x607A = 0x6064 throughout; `bValid` TRUE | none: the motor holds, no jump |
-| 3 | `bEnable` FALSE | 0x0007 (T5), then 0x0002 to Switch on disabled, then 0x0000 once `tStateTimeout` has passed with no bit 3 sent; the motor stops as 0x605C says | none |
+| 3 | `bEnable` FALSE | 0x0007 (T5), then 0x0002 to Switch on disabled, then 0x0000 once the drive shows Switch on disabled (or after `tStateTimeout` with no bit 3 sent, if it stays in Switched on or Ready to switch on); the motor stops as 0x605C says | none |
 | 4 | Enable as in 2, then move the target a few hundred increments in small steps | `bValid` stays TRUE; the trajectory starts from the target the FB left on the rising edge of `bValid` | small |
 | 5 | `bQuickStop` TRUE for one scan, at standstill, then while moving as in 4 | 0x0002 at once and held (T11); Quick stop active, then Switch on disabled (0x605A 0–4), or held at standstill and left with T12 (5–8, with `bQuickStopStays`); `bError` FALSE. `bEnable` TRUE does not restart it: drop `bEnable`, then raise it | small |
 | 6 | Make the drive fault, safely: a following-error window 0x6065 of a few increments and a small move, or the drive's own test fault | `bError`, 16#8110, `eDriveState` Fault; read 0x603F and look it up for that vendor | small |
